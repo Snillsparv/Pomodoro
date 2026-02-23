@@ -16,11 +16,13 @@
   <div id="app">
     <nav>
       <button class="nav-btn active" data-view="timer">Timer</button>
+      <button class="nav-btn" data-view="plan">Planera</button>
       <button class="nav-btn" data-view="stats">Statistik</button>
     </nav>
 
     <!-- Timer View -->
     <div id="timer-view" class="view active">
+      <div id="current-task-banner" class="hidden"></div>
       <div id="session-label"></div>
       <div id="timer-display">25:00</div>
       <div id="timer-controls">
@@ -38,6 +40,57 @@
         <input type="text" id="activity-input" placeholder="Skriv aktivitet..." autocomplete="off">
         <div id="activity-suggestions"></div>
         <button id="btn-save-activity">Spara</button>
+      </div>
+    </div>
+
+    <!-- Plan View -->
+    <div id="plan-view" class="view">
+      <!-- Today's schedule -->
+      <div id="schedule-section">
+        <div class="section-header">
+          <h2>Dagens schema</h2>
+          <button id="btn-add-to-schedule" class="btn-icon">+</button>
+        </div>
+        <div id="schedule-list"></div>
+        <div id="schedule-empty" class="no-data">Tryck + f&ouml;r att l&auml;gga till uppgifter</div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- Projects & tasks -->
+      <div id="projects-section">
+        <div class="section-header">
+          <h2>Projekt</h2>
+          <button id="btn-add-project" class="btn-icon">+</button>
+        </div>
+        <div id="projects-list"></div>
+      </div>
+    </div>
+
+    <!-- Add to schedule modal -->
+    <div id="schedule-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>L&auml;gg till i schema</h2>
+        <div id="schedule-picker"></div>
+        <button id="btn-close-picker" class="btn-secondary">St&auml;ng</button>
+      </div>
+    </div>
+
+    <!-- Add/Edit project modal -->
+    <div id="project-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2 id="project-modal-title">Nytt projekt</h2>
+        <input type="text" id="project-name-input" placeholder="Projektnamn..." autocomplete="off">
+        <button id="btn-save-project">Spara</button>
+      </div>
+    </div>
+
+    <!-- Add task modal -->
+    <div id="task-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>Ny uppgift</h2>
+        <input type="text" id="task-name-input" placeholder="Uppgiftsnamn..." autocomplete="off">
+        <button id="btn-save-task">Spara</button>
       </div>
     </div>
 
