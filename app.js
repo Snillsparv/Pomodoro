@@ -316,7 +316,7 @@
       var taskName = task ? task.name : 'Borttagen';
       var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
 
-      return '<div class="' + cls + '" data-idx="' + idx + '">' +
+      return '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + item.taskId + '">' +
         indicator +
         '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
         addBtn +
@@ -348,6 +348,7 @@
 
   function initTimerScheduleDrag(el) {
     var idx = parseInt(el.dataset.idx);
+    var taskId = el.dataset.taskId;
 
     function onStart(clientX, clientY, e) {
       if (e.target.closest('.ts-add-pom')) return;
@@ -355,6 +356,7 @@
       drag.started = false;
       drag.type = 'timer-reorder';
       drag.sourceIdx = idx;
+      drag.taskId = taskId;
       drag.sourceEl = el;
       drag.startX = clientX;
       drag.startY = clientY;
@@ -1098,6 +1100,7 @@
     taskDetailModal.classList.add('hidden');
     editingTaskId = null;
     renderPlanView();
+    updateTaskBanner();
   }
 
   // ========================================
@@ -1319,7 +1322,7 @@
         }
         updateTaskBanner();
       }
-    } else if (drag.type === 'task-to-schedule' && drag.taskId) {
+    } else if (drag.taskId) {
       // Wasn't a drag (no movement) → open task detail
       openTaskDetail(drag.taskId);
     }
