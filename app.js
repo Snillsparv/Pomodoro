@@ -7,6 +7,11 @@
   var WORK_SECONDS = WORK_MINUTES * 60;
   var BREAK_SECONDS = BREAK_MINUTES * 60;
 
+  var PROJECT_COLORS = [
+    '#e94560', '#53a8b6', '#f0a500', '#a855f7',
+    '#34d399', '#f472b6', '#60a5fa', '#fb923c'
+  ];
+
   // --- State ---
   var timeLeft = WORK_SECONDS;
   var isRunning = false;
@@ -102,6 +107,21 @@
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   }
 
+  function getProjectColor(project) {
+    if (!project) return '#8888aa';
+    if (project.color) return project.color;
+    return PROJECT_COLORS[0];
+  }
+
+  function nextProjectColor() {
+    var projects = getProjects();
+    var usedColors = projects.map(function (p) { return p.color; }).filter(Boolean);
+    for (var i = 0; i < PROJECT_COLORS.length; i++) {
+      if (usedColors.indexOf(PROJECT_COLORS[i]) === -1) return PROJECT_COLORS[i];
+    }
+    return PROJECT_COLORS[projects.length % PROJECT_COLORS.length];
+  }
+
   function getRecentActivities() {
     var sessions = getSessions();
     var seen = {};
@@ -172,9 +192,11 @@
     var projectName = project ? project.name : '';
     var taskName = task ? task.name : 'Okänd uppgift';
     var progress = item.completed + '/' + item.pomodoros;
+    var color = getProjectColor(project);
 
+    currentTaskBanner.style.borderLeft = '4px solid ' + color;
     currentTaskBanner.innerHTML =
-      '<span class="banner-project">' + escapeHtml(projectName) + '</span>' +
+      '<span class="banner-project" style="color:' + color + '">' + escapeHtml(projectName) + '</span>' +
       '<span class="banner-task">' + escapeHtml(taskName) + '</span>' +
       '<span class="banner-progress">' + progress + '</span>';
     currentTaskBanner.classList.remove('hidden');
@@ -413,9 +435,10 @@
           '</div>';
       }).join('');
 
-      return '<div class="project-card">' +
+      var color = getProjectColor(proj);
+      return '<div class="project-card" style="border-left:4px solid ' + color + '">' +
         '<div class="project-header">' +
-        '<span class="project-name">' + escapeHtml(proj.name) + '</span>' +
+        '<span class="project-name" style="color:' + color + '">' + escapeHtml(proj.name) + '</span>' +
         '<div class="project-actions">' +
         '<button class="btn-add-task btn-tiny" data-project-id="' + proj.id + '">+</button>' +
         '<button class="btn-delete-project btn-tiny" data-project-id="' + proj.id + '">&times;</button>' +
@@ -462,8 +485,9 @@
   function saveProject() {
     var name = projectNameInput.value.trim();
     if (!name) return;
+    var color = nextProjectColor();
     var projects = getProjects();
-    projects.push({ id: generateId(), name: name });
+    projects.push({ id: generateId(), name: name, color: color });
     saveProjects(projects);
     projectModal.classList.add('hidden');
     renderProjects();
@@ -531,9 +555,10 @@
       var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
       var isDone = item.completed >= item.pomodoros;
 
-      return '<div class="schedule-item' + (isDone ? ' done' : '') + '">' +
+      var color = getProjectColor(project);
+      return '<div class="schedule-item' + (isDone ? ' done' : '') + '" style="border-left:4px solid ' + color + '">' +
         '<div class="schedule-item-info">' +
-        '<span class="schedule-project">' + escapeHtml(project ? project.name : '') + '</span>' +
+        '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : '') + '</span>' +
         '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
         '</div>' +
         '<div class="schedule-item-controls">' +
@@ -636,8 +661,9 @@
           '</button>';
       }).join('');
 
+      var color = getProjectColor(proj);
       return '<div class="picker-project">' +
-        '<div class="picker-project-name">' + escapeHtml(proj.name) + '</div>' +
+        '<div class="picker-project-name" style="color:' + color + '">' + escapeHtml(proj.name) + '</div>' +
         '<div class="picker-tasks">' + taskBtns + '</div>' +
         '</div>';
     }).join('');
