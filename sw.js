@@ -1,4 +1,4 @@
-var CACHE_NAME = 'pomodoro-v3';
+var CACHE_NAME = 'pomodoro-v4';
 var ASSETS = [
   './',
   './index.html',

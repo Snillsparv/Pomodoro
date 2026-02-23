@@ -532,6 +532,67 @@ nav {
   margin: 24px 0;
 }
 
+/* Schedule date navigation */
+#schedule-date-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+#schedule-date-nav button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #16213e;
+  color: #eee;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-height: 38px;
+  min-width: 38px;
+}
+
+#schedule-date-nav button:active {
+  transform: scale(0.95);
+}
+
+#schedule-date-nav button:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+#schedule-date-nav button:disabled:active {
+  transform: none;
+}
+
+#schedule-date-label {
+  font-size: 15px;
+  color: #ccc;
+  min-width: 150px;
+  text-align: center;
+}
+
+/* History schedule (read-only) */
+.schedule-item.history-item {
+  opacity: 0.7;
+  cursor: default;
+  touch-action: auto;
+}
+
+.schedule-item.history-item .schedule-drag-handle {
+  display: none;
+}
+
+.schedule-history-summary {
+  text-align: center;
+  color: #8888aa;
+  font-size: 14px;
+  padding: 8px 0;
+  margin-top: 4px;
+}
+
 /* Schedule */
 #schedule-section {
   margin-bottom: 0;

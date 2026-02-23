@@ -20,6 +20,7 @@
   var todayPomodoros = 0;
   var activeScheduleIndex = -1; // which schedule item is active in timer
   var addTaskToProjectId = null; // which project we're adding a task to
+  var scheduleViewDate = null; // null = today, otherwise a date string for history
 
   // --- DOM Elements ---
   var timerDisplay = document.getElementById('timer-display');
@@ -49,6 +50,11 @@
   var btnAddToSchedule = document.getElementById('btn-add-to-schedule');
   var scheduleList = document.getElementById('schedule-list');
   var scheduleEmpty = document.getElementById('schedule-empty');
+  var scheduleHeading = document.getElementById('schedule-heading');
+  var scheduleDateNav = document.getElementById('schedule-date-nav');
+  var schedulePrev = document.getElementById('schedule-prev');
+  var scheduleNext = document.getElementById('schedule-next');
+  var scheduleDateLabel = document.getElementById('schedule-date-label');
 
   // Modals
   var scheduleModal = document.getElementById('schedule-modal');
@@ -92,16 +98,45 @@
     return new Date().toISOString().slice(0, 10);
   }
 
+  function getScheduleHistory() {
+    return JSON.parse(localStorage.getItem('pomodoro_schedule_history') || '{}');
+  }
+
+  function saveScheduleHistory(history) {
+    localStorage.setItem('pomodoro_schedule_history', JSON.stringify(history));
+  }
+
+  function archiveSchedule(data) {
+    if (!data || !data.date || !data.items || data.items.length === 0) return;
+    var history = getScheduleHistory();
+    history[data.date] = data.items;
+    saveScheduleHistory(history);
+  }
+
   function getSchedule() {
     var data = JSON.parse(localStorage.getItem('pomodoro_schedule') || '{}');
     if (data.date !== todayStr()) {
+      // Archive the old schedule before replacing
+      archiveSchedule(data);
       return { date: todayStr(), items: [] };
     }
     return data;
   }
 
+  function getScheduleForDate(dateStr) {
+    if (dateStr === todayStr()) return getSchedule();
+    var history = getScheduleHistory();
+    return { date: dateStr, items: history[dateStr] || [] };
+  }
+
   function saveSchedule(schedule) {
     localStorage.setItem('pomodoro_schedule', JSON.stringify(schedule));
+    // Also keep history in sync for today
+    if (schedule.date === todayStr() && schedule.items.length > 0) {
+      var history = getScheduleHistory();
+      history[schedule.date] = schedule.items;
+      saveScheduleHistory(history);
+    }
   }
 
   function generateId() {
@@ -486,7 +521,10 @@
       views.forEach(function (v) { v.classList.remove('active'); });
       document.getElementById(target + '-view').classList.add('active');
       if (target === 'stats') renderStats();
-      if (target === 'plan') renderPlanView();
+      if (target === 'plan') {
+        scheduleViewDate = null;
+        renderPlanView();
+      }
       if (target === 'timer') updateTaskBanner();
     });
   });
@@ -495,8 +533,61 @@
   // Projects & Tasks (Planera)
   // ========================================
   function renderPlanView() {
+    updateScheduleDateNav();
     renderSchedule();
     renderProjects();
+  }
+
+  function formatDateLabel(dateStr) {
+    var today = todayStr();
+    if (dateStr === today) return 'Idag';
+    var yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    if (dateStr === yesterday.toISOString().slice(0, 10)) return 'Ig\u00e5r';
+    var d = new Date(dateStr + 'T12:00:00');
+    return d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+
+  function getScheduleDates() {
+    var history = getScheduleHistory();
+    var dates = Object.keys(history).filter(function (d) { return (history[d] && history[d].length > 0); });
+    // Also include today if it has items
+    var schedule = getSchedule();
+    if (schedule.items.length > 0 && dates.indexOf(todayStr()) === -1) {
+      dates.push(todayStr());
+    }
+    dates.sort();
+    return dates;
+  }
+
+  function updateScheduleDateNav() {
+    var viewDate = scheduleViewDate || todayStr();
+    var isToday = viewDate === todayStr();
+
+    scheduleDateLabel.textContent = formatDateLabel(viewDate);
+
+    // Can always go back if there's history before current view
+    var dates = getScheduleDates();
+    var currentIdx = dates.indexOf(viewDate);
+
+    // Prev: enabled if there are dates before current, or if we're on today and there's any history
+    var hasPrev = false;
+    if (currentIdx > 0) {
+      hasPrev = true;
+    } else if (currentIdx === -1 && dates.length > 0) {
+      // viewDate is not in the list — check if there are dates before it
+      for (var i = 0; i < dates.length; i++) {
+        if (dates[i] < viewDate) { hasPrev = true; break; }
+      }
+    }
+    schedulePrev.disabled = !hasPrev;
+
+    // Next: enabled if we're viewing history and there are newer dates or we can go to today
+    scheduleNext.disabled = isToday;
+
+    // Show/hide editing controls based on whether viewing today
+    btnAddToSchedule.style.display = isToday ? '' : 'none';
+    scheduleHeading.textContent = isToday ? 'Dagens schema' : 'Schema';
   }
 
   // --- Projects ---
@@ -630,63 +721,133 @@
     renderPlanView();
   }
 
+  // --- Schedule date navigation ---
+  schedulePrev.addEventListener('click', function () {
+    var viewDate = scheduleViewDate || todayStr();
+    var dates = getScheduleDates();
+    // Find the closest date before current viewDate
+    var prevDate = null;
+    for (var i = dates.length - 1; i >= 0; i--) {
+      if (dates[i] < viewDate) { prevDate = dates[i]; break; }
+    }
+    if (prevDate) {
+      scheduleViewDate = prevDate;
+      updateScheduleDateNav();
+      renderSchedule();
+    }
+  });
+
+  scheduleNext.addEventListener('click', function () {
+    var viewDate = scheduleViewDate || todayStr();
+    if (viewDate === todayStr()) return;
+    var dates = getScheduleDates();
+    // Find the closest date after current viewDate
+    var nextDate = null;
+    for (var i = 0; i < dates.length; i++) {
+      if (dates[i] > viewDate) { nextDate = dates[i]; break; }
+    }
+    // If no next date in history, go to today
+    if (!nextDate || nextDate >= todayStr()) {
+      scheduleViewDate = null;
+    } else {
+      scheduleViewDate = nextDate;
+    }
+    updateScheduleDateNav();
+    renderSchedule();
+  });
+
   // --- Schedule ---
   function renderSchedule() {
-    var schedule = getSchedule();
+    var viewDate = scheduleViewDate || todayStr();
+    var isToday = viewDate === todayStr();
+    var schedule = isToday ? getSchedule() : getScheduleForDate(viewDate);
     var tasks = getTasks();
     var projects = getProjects();
 
     if (schedule.items.length === 0) {
       scheduleList.innerHTML = '';
       scheduleEmpty.classList.remove('hidden');
+      scheduleEmpty.textContent = isToday ? 'Dra uppgifter hit eller tryck +' : 'Inget schema denna dag';
       return;
     }
 
     scheduleEmpty.classList.add('hidden');
-    scheduleList.innerHTML = schedule.items.map(function (item, idx) {
-      var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
-      var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-      var isDone = item.completed >= item.pomodoros;
 
-      var color = getProjectColor(project);
-      return '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-idx="' + idx + '" style="border-left:4px solid ' + color + '">' +
-        '<span class="schedule-drag-handle">&#9776;</span>' +
-        '<div class="schedule-item-body">' +
-        '<div class="schedule-item-info">' +
-        '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + '</span>' +
-        '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
-        '</div>' +
-        '</div>' +
-        '<div class="schedule-item-controls">' +
-        '<button class="btn-pom-minus btn-tiny" data-idx="' + idx + '">&minus;</button>' +
-        '<span class="schedule-pom-count">' + item.completed + '/' + item.pomodoros + '</span>' +
-        '<button class="btn-pom-plus btn-tiny" data-idx="' + idx + '">+</button>' +
-        '<button class="btn-remove-schedule btn-tiny" data-idx="' + idx + '">&times;</button>' +
-        '</div>' +
+    if (isToday) {
+      // Editable today view
+      scheduleList.innerHTML = schedule.items.map(function (item, idx) {
+        var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
+        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+        var isDone = item.completed >= item.pomodoros;
+
+        var color = getProjectColor(project);
+        return '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-idx="' + idx + '" style="border-left:4px solid ' + color + '">' +
+          '<span class="schedule-drag-handle">&#9776;</span>' +
+          '<div class="schedule-item-body">' +
+          '<div class="schedule-item-info">' +
+          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + '</span>' +
+          '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
+          '</div>' +
+          '</div>' +
+          '<div class="schedule-item-controls">' +
+          '<button class="btn-pom-minus btn-tiny" data-idx="' + idx + '">&minus;</button>' +
+          '<span class="schedule-pom-count">' + item.completed + '/' + item.pomodoros + '</span>' +
+          '<button class="btn-pom-plus btn-tiny" data-idx="' + idx + '">+</button>' +
+          '<button class="btn-remove-schedule btn-tiny" data-idx="' + idx + '">&times;</button>' +
+          '</div>' +
+          '</div>';
+      }).join('');
+
+      // Event listeners
+      scheduleList.querySelectorAll('.btn-pom-minus').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          changePomCount(parseInt(btn.dataset.idx), -1);
+        });
+      });
+      scheduleList.querySelectorAll('.btn-pom-plus').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          changePomCount(parseInt(btn.dataset.idx), 1);
+        });
+      });
+      scheduleList.querySelectorAll('.btn-remove-schedule').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          removeScheduleItem(parseInt(btn.dataset.idx));
+        });
+      });
+
+      // Whole schedule items are draggable
+      scheduleList.querySelectorAll('.schedule-item').forEach(function (item) {
+        initScheduleDrag(item);
+      });
+    } else {
+      // Read-only history view
+      var totalCompleted = 0;
+      var totalPomodoros = 0;
+
+      scheduleList.innerHTML = schedule.items.map(function (item) {
+        var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
+        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+        var isDone = item.completed >= item.pomodoros;
+        totalCompleted += item.completed;
+        totalPomodoros += item.pomodoros;
+
+        var color = getProjectColor(project);
+        return '<div class="schedule-item history-item' + (isDone ? ' done' : '') + '" style="border-left:4px solid ' + color + '">' +
+          '<div class="schedule-item-body">' +
+          '<div class="schedule-item-info">' +
+          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + '</span>' +
+          '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
+          '</div>' +
+          '</div>' +
+          '<span class="schedule-pom-count">' + item.completed + '/' + item.pomodoros + '</span>' +
+          '</div>';
+      }).join('');
+
+      // Summary
+      scheduleList.innerHTML += '<div class="schedule-history-summary">' +
+        totalCompleted + '/' + totalPomodoros + ' pomodoros avklarade' +
         '</div>';
-    }).join('');
-
-    // Event listeners
-    scheduleList.querySelectorAll('.btn-pom-minus').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        changePomCount(parseInt(btn.dataset.idx), -1);
-      });
-    });
-    scheduleList.querySelectorAll('.btn-pom-plus').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        changePomCount(parseInt(btn.dataset.idx), 1);
-      });
-    });
-    scheduleList.querySelectorAll('.btn-remove-schedule').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        removeScheduleItem(parseInt(btn.dataset.idx));
-      });
-    });
-
-    // Whole schedule items are draggable
-    scheduleList.querySelectorAll('.schedule-item').forEach(function (item) {
-      initScheduleDrag(item);
-    });
+    }
   }
 
   function changePomCount(idx, delta) {
