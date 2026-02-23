@@ -14,6 +14,7 @@
 
   // --- State ---
   var timeLeft = WORK_SECONDS;
+  var endTime = null; // wall-clock timestamp (ms) when timer expires
   var isRunning = false;
   var isBreak = false;
   var intervalId = null;
@@ -517,10 +518,11 @@
   }
 
   function tick() {
-    timeLeft--;
+    timeLeft = Math.round((endTime - Date.now()) / 1000);
     if (timeLeft < 0) {
       clearInterval(intervalId);
       intervalId = null;
+      endTime = null;
       isRunning = false;
 
       if (isBreak) {
@@ -548,8 +550,13 @@
       }
       return;
     }
-    updateDisplay();
+    if (timeLeft !== lastTickDisplay) {
+      lastTickDisplay = timeLeft;
+      updateDisplay();
+    }
   }
+
+  var lastTickDisplay = -1;
 
   function autoLogFromSchedule() {
     var schedule = getSchedule();
@@ -600,15 +607,19 @@
     } catch (e) { /* ignore */ }
     // Play start sound (only for work sessions, not breaks)
     if (!isBreak) playAlarm('start');
+    endTime = Date.now() + timeLeft * 1000;
     isRunning = true;
     btnStart.disabled = true;
     btnPause.disabled = false;
-    intervalId = setInterval(tick, 1000);
+    intervalId = setInterval(tick, 250);
     updateDisplay();
   }
 
   function pauseTimer() {
     if (!isRunning) return;
+    // Snapshot remaining time from wall clock
+    timeLeft = Math.max(0, Math.round((endTime - Date.now()) / 1000));
+    endTime = null;
     isRunning = false;
     clearInterval(intervalId);
     intervalId = null;
@@ -619,6 +630,7 @@
   function resetTimer() {
     pauseTimer();
     isBreak = false;
+    endTime = null;
     timeLeft = WORK_SECONDS;
     btnStart.disabled = false;
     btnStart.textContent = 'Starta';
