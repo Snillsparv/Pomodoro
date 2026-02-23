@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pomodoro Timer</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <nav>
+      <button class="nav-btn active" data-view="timer">Timer</button>
+      <button class="nav-btn" data-view="stats">Statistik</button>
+    </nav>
+
+    <!-- Timer View -->
+    <div id="timer-view" class="view active">
+      <div id="session-label"></div>
+      <div id="timer-display">25:00</div>
+      <div id="timer-controls">
+        <button id="btn-start">Starta</button>
+        <button id="btn-pause" disabled>Pausa</button>
+        <button id="btn-reset">Nollst&auml;ll</button>
+      </div>
+      <div id="pomodoro-count"></div>
+    </div>
+
+    <!-- Log Activity Modal -->
+    <div id="log-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>Vad jobbade du med?</h2>
+        <input type="text" id="activity-input" placeholder="Skriv aktivitet..." autocomplete="off">
+        <div id="activity-suggestions"></div>
+        <button id="btn-save-activity">Spara</button>
+      </div>
+    </div>
+
+    <!-- Stats View -->
+    <div id="stats-view" class="view">
+      <div id="stats-tabs">
+        <button class="stats-tab active" data-period="day">Dag</button>
+        <button class="stats-tab" data-period="week">Vecka</button>
+        <button class="stats-tab" data-period="month">M&aring;nad</button>
+      </div>
+      <div id="stats-nav">
+        <button id="stats-prev">&larr;</button>
+        <span id="stats-period-label"></span>
+        <button id="stats-next">&rarr;</button>
+      </div>
+      <div id="stats-summary"></div>
+      <div id="stats-breakdown"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

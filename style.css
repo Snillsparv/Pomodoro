@@ -1,0 +1,357 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #1a1a2e;
+  color: #eee;
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+#app {
+  width: 100%;
+  max-width: 480px;
+  padding: 20px;
+  min-height: 100vh;
+}
+
+/* Navigation */
+nav {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 32px;
+}
+
+.nav-btn {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 8px;
+  background: #16213e;
+  color: #8888aa;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.nav-btn.active {
+  background: #e94560;
+  color: #fff;
+}
+
+.nav-btn:hover:not(.active) {
+  background: #1a2744;
+}
+
+/* Views */
+.view {
+  display: none;
+}
+
+.view.active {
+  display: block;
+}
+
+/* Timer */
+#session-label {
+  text-align: center;
+  font-size: 18px;
+  color: #8888aa;
+  margin-bottom: 8px;
+  min-height: 27px;
+}
+
+#timer-display {
+  text-align: center;
+  font-size: 96px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+  margin-bottom: 32px;
+  letter-spacing: 4px;
+}
+
+#timer-display.break-mode {
+  color: #0f3460;
+}
+
+#timer-controls {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+#timer-controls button {
+  padding: 14px 28px;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+#btn-start {
+  background: #e94560;
+  color: #fff;
+}
+
+#btn-start:hover {
+  background: #c73a52;
+}
+
+#btn-pause {
+  background: #16213e;
+  color: #eee;
+}
+
+#btn-pause:hover:not(:disabled) {
+  background: #1a2744;
+}
+
+#btn-pause:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+#btn-reset {
+  background: #16213e;
+  color: #eee;
+}
+
+#btn-reset:hover {
+  background: #1a2744;
+}
+
+#pomodoro-count {
+  text-align: center;
+  color: #8888aa;
+  font-size: 14px;
+}
+
+/* Modal */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 100;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: #16213e;
+  border-radius: 16px;
+  padding: 32px;
+  width: 90%;
+  max-width: 400px;
+}
+
+.modal-content h2 {
+  margin-bottom: 20px;
+  font-size: 20px;
+  color: #fff;
+}
+
+#activity-input {
+  width: 100%;
+  padding: 14px;
+  border: 2px solid #0f3460;
+  border-radius: 8px;
+  background: #1a1a2e;
+  color: #eee;
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#activity-input:focus {
+  border-color: #e94560;
+}
+
+#activity-suggestions {
+  margin-top: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.suggestion {
+  padding: 10px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  color: #ccc;
+  transition: background 0.15s;
+}
+
+.suggestion:hover {
+  background: #0f3460;
+  color: #fff;
+}
+
+#btn-save-activity {
+  width: 100%;
+  margin-top: 20px;
+  padding: 14px;
+  border: none;
+  border-radius: 8px;
+  background: #e94560;
+  color: #fff;
+  font-size: 16px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#btn-save-activity:hover {
+  background: #c73a52;
+}
+
+/* Stats */
+#stats-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.stats-tab {
+  flex: 1;
+  padding: 10px;
+  border: none;
+  border-radius: 8px;
+  background: #16213e;
+  color: #8888aa;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.stats-tab.active {
+  background: #0f3460;
+  color: #fff;
+}
+
+.stats-tab:hover:not(.active) {
+  background: #1a2744;
+}
+
+#stats-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+#stats-nav button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: #16213e;
+  color: #eee;
+  font-size: 18px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+#stats-nav button:hover {
+  background: #1a2744;
+}
+
+#stats-period-label {
+  font-size: 16px;
+  color: #ccc;
+  min-width: 180px;
+  text-align: center;
+}
+
+#stats-summary {
+  background: #16213e;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+#stats-summary .total-time {
+  font-size: 36px;
+  font-weight: 700;
+  color: #e94560;
+}
+
+#stats-summary .total-label {
+  font-size: 14px;
+  color: #8888aa;
+  margin-top: 4px;
+}
+
+#stats-summary .total-sessions {
+  font-size: 14px;
+  color: #8888aa;
+  margin-top: 8px;
+}
+
+#stats-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.activity-row {
+  background: #16213e;
+  border-radius: 10px;
+  padding: 16px;
+}
+
+.activity-row .activity-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.activity-row .activity-name {
+  font-size: 15px;
+  color: #eee;
+}
+
+.activity-row .activity-time {
+  font-size: 15px;
+  color: #e94560;
+  font-weight: 600;
+}
+
+.activity-row .activity-bar-bg {
+  height: 6px;
+  background: #0f3460;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.activity-row .activity-bar {
+  height: 100%;
+  background: #e94560;
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
+.activity-row .activity-sessions {
+  font-size: 12px;
+  color: #8888aa;
+  margin-top: 6px;
+}
+
+.no-data {
+  text-align: center;
+  color: #8888aa;
+  padding: 40px 0;
+  font-size: 15px;
+}
