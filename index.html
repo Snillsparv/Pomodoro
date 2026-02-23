@@ -2,7 +2,13 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
   <title>Pomodoro Timer</title>
   <link rel="stylesheet" href="style.css">
 </head>
@@ -10,11 +16,13 @@
   <div id="app">
     <nav>
       <button class="nav-btn active" data-view="timer">Timer</button>
+      <button class="nav-btn" data-view="plan">Planera</button>
       <button class="nav-btn" data-view="stats">Statistik</button>
     </nav>
 
     <!-- Timer View -->
     <div id="timer-view" class="view active">
+      <div id="current-task-banner" class="hidden"></div>
       <div id="session-label"></div>
       <div id="timer-display">25:00</div>
       <div id="timer-controls">
@@ -23,6 +31,18 @@
         <button id="btn-reset">Nollst&auml;ll</button>
       </div>
       <div id="pomodoro-count"></div>
+      <div id="timer-schedule"></div>
+      <button id="btn-timer-add" class="btn-timer-add">+ L&auml;gg till</button>
+    </div>
+
+    <!-- Quick-add task modal (from timer) -->
+    <div id="quick-add-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>L&auml;gg till uppgift</h2>
+        <input type="text" id="quick-add-name" placeholder="Namn (valfritt)..." autocomplete="off">
+        <select id="quick-add-project"></select>
+        <button id="btn-quick-add-save">L&auml;gg till</button>
+      </div>
     </div>
 
     <!-- Log Activity Modal -->
@@ -32,6 +52,72 @@
         <input type="text" id="activity-input" placeholder="Skriv aktivitet..." autocomplete="off">
         <div id="activity-suggestions"></div>
         <button id="btn-save-activity">Spara</button>
+      </div>
+    </div>
+
+    <!-- Plan View -->
+    <div id="plan-view" class="view">
+      <!-- Today's schedule -->
+      <div id="schedule-section">
+        <div class="section-header">
+          <h2 id="schedule-heading">Dagens schema</h2>
+          <button id="btn-add-to-schedule" class="btn-icon">+</button>
+        </div>
+        <div id="schedule-date-nav">
+          <button id="schedule-prev">&larr;</button>
+          <span id="schedule-date-label">Idag</span>
+          <button id="schedule-next">&rarr;</button>
+        </div>
+        <div id="schedule-list"></div>
+        <div id="schedule-empty" class="no-data">Dra uppgifter hit eller tryck +</div>
+      </div>
+
+      <hr class="divider">
+
+      <!-- Projects & tasks -->
+      <div id="projects-section">
+        <div class="section-header">
+          <h2>Projekt</h2>
+          <button id="btn-add-project" class="btn-icon">+</button>
+        </div>
+        <div id="projects-list"></div>
+      </div>
+    </div>
+
+    <!-- Add to schedule modal -->
+    <div id="schedule-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>L&auml;gg till i schema</h2>
+        <div id="schedule-picker"></div>
+        <button id="btn-close-picker" class="btn-secondary">St&auml;ng</button>
+      </div>
+    </div>
+
+    <!-- Add/Edit project modal -->
+    <div id="project-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2 id="project-modal-title">Nytt projekt</h2>
+        <input type="text" id="project-name-input" placeholder="Projektnamn..." autocomplete="off">
+        <button id="btn-save-project">Spara</button>
+      </div>
+    </div>
+
+    <!-- Add task modal -->
+    <div id="task-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>Ny uppgift</h2>
+        <input type="text" id="task-name-input" placeholder="Uppgiftsnamn..." autocomplete="off">
+        <button id="btn-save-task">Spara</button>
+      </div>
+    </div>
+
+    <!-- Task detail modal -->
+    <div id="task-detail-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>Redigera uppgift</h2>
+        <input type="text" id="task-detail-name" placeholder="Uppgiftsnamn..." autocomplete="off">
+        <textarea id="task-detail-desc" placeholder="Beskrivning (valfritt)..." rows="4"></textarea>
+        <button id="btn-save-task-detail">Spara</button>
       </div>
     </div>
 
@@ -53,5 +139,10 @@
   </div>
 
   <script src="app.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js');
+    }
+  </script>
 </body>
 </html>

@@ -2,40 +2,53 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #1a1a2e;
+  background: #1a1a2e url('bg_cyber.svg') center center / cover no-repeat fixed;
   color: #eee;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   justify-content: center;
   align-items: flex-start;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #app {
   width: 100%;
   max-width: 480px;
   padding: 20px;
+  padding-top: max(20px, env(safe-area-inset-top));
+  padding-bottom: max(20px, env(safe-area-inset-bottom));
   min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: rgba(26, 26, 46, 0.82);
 }
 
 /* Navigation */
 nav {
   display: flex;
-  gap: 8px;
-  margin-bottom: 32px;
+  gap: 6px;
+  margin-bottom: 24px;
+  flex-shrink: 0;
 }
 
 .nav-btn {
   flex: 1;
-  padding: 12px;
+  padding: 12px 8px;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #16213e;
   color: #8888aa;
-  font-size: 16px;
+  font-size: 15px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -45,20 +58,72 @@ nav {
   color: #fff;
 }
 
-.nav-btn:hover:not(.active) {
+.nav-btn:active:not(.active) {
   background: #1a2744;
 }
 
 /* Views */
 .view {
   display: none;
+  flex: 1;
 }
 
 .view.active {
-  display: block;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Timer */
+/* ========================================
+   Timer View
+   ======================================== */
+#timer-view {
+  justify-content: center;
+  align-items: center;
+  padding-bottom: 60px;
+}
+
+#current-task-banner {
+  background: #16213e;
+  border-radius: 12px;
+  padding: 14px 18px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 360px;
+}
+
+#current-task-banner.hidden {
+  display: none;
+}
+
+.banner-project {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.banner-task {
+  font-size: 16px;
+  color: #fff;
+  flex: 1;
+}
+
+.banner-progress {
+  font-size: 14px;
+  color: #8888aa;
+  font-variant-numeric: tabular-nums;
+}
+
+.banner-done {
+  font-size: 16px;
+  color: #53a8b6;
+  width: 100%;
+  text-align: center;
+}
+
 #session-label {
   text-align: center;
   font-size: 18px;
@@ -69,32 +134,38 @@ nav {
 
 #timer-display {
   text-align: center;
-  font-size: 96px;
+  font-size: min(26vw, 108px);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   color: #fff;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
   letter-spacing: 4px;
 }
 
 #timer-display.break-mode {
-  color: #0f3460;
+  color: #53a8b6;
 }
 
 #timer-controls {
   display: flex;
   justify-content: center;
   gap: 12px;
-  margin-bottom: 32px;
+  margin-bottom: 40px;
 }
 
 #timer-controls button {
-  padding: 14px 28px;
+  padding: 16px 32px;
   border: none;
-  border-radius: 8px;
-  font-size: 16px;
+  border-radius: 12px;
+  font-size: 17px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.15s;
+  min-height: 52px;
+}
+
+#timer-controls button:active {
+  transform: scale(0.96);
 }
 
 #btn-start {
@@ -102,22 +173,18 @@ nav {
   color: #fff;
 }
 
-#btn-start:hover {
-  background: #c73a52;
-}
-
 #btn-pause {
   background: #16213e;
   color: #eee;
 }
 
-#btn-pause:hover:not(:disabled) {
-  background: #1a2744;
+#btn-pause:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
-#btn-pause:disabled {
-  opacity: 0.4;
-  cursor: default;
+#btn-pause:disabled:active {
+  transform: none;
 }
 
 #btn-reset {
@@ -125,24 +192,174 @@ nav {
   color: #eee;
 }
 
-#btn-reset:hover {
-  background: #1a2744;
-}
-
 #pomodoro-count {
   text-align: center;
   color: #8888aa;
+  font-size: 15px;
+}
+
+/* Timer schedule list */
+#timer-schedule {
+  width: 100%;
+  max-width: 360px;
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#timer-schedule:empty {
+  display: none;
+}
+
+.ts-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  border-radius: 10px;
+  transition: opacity 0.3s;
+  touch-action: none;
+  cursor: grab;
+}
+
+.ts-item.ts-done {
+  opacity: 0.35;
+}
+
+.ts-item.ts-current {
+  background: rgba(22, 33, 62, 0.7);
+  opacity: 1;
+}
+
+.ts-item.ts-upcoming {
+  opacity: 0.4;
+}
+
+.ts-item.dragging {
+  opacity: 0.15;
+}
+
+.ts-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ts-item.ts-done .ts-dot {
+  opacity: 0.5;
+}
+
+.ts-check {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+  color: #53a8b6;
+}
+
+.ts-name {
+  flex: 1;
+  font-size: 14px;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ts-item.ts-done .ts-name {
+  text-decoration: line-through;
+  color: #888;
+}
+
+.ts-item.ts-current .ts-name {
+  color: #fff;
+  font-weight: 500;
+}
+
+.ts-add-pom {
+  flex-shrink: 0;
   font-size: 14px;
 }
 
-/* Modal */
+.ts-drop-placeholder {
+  height: 3px;
+  background: #53a8b6;
+  border-radius: 2px;
+  margin: 1px 0;
+}
+
+/* Timer add button */
+.btn-timer-add {
+  margin-top: 16px;
+  padding: 10px 20px;
+  border: 2px dashed #0f3460;
+  border-radius: 10px;
+  background: transparent;
+  color: #8888aa;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-timer-add:active {
+  border-color: #53a8b6;
+  color: #53a8b6;
+}
+
+/* Quick-add modal select */
+#quick-add-project {
+  width: 100%;
+  padding: 14px 16px;
+  margin-top: 12px;
+  border: 2px solid #0f3460;
+  border-radius: 12px;
+  background: #1a1a2e;
+  color: #eee;
+  font-size: 16px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238888aa' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 16px center;
+}
+
+#quick-add-project:focus {
+  border-color: #e94560;
+}
+
+#btn-quick-add-save {
+  width: 100%;
+  margin-top: 20px;
+  padding: 16px;
+  border: none;
+  border-radius: 12px;
+  background: #e94560;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-height: 52px;
+}
+
+#btn-quick-add-save:active {
+  transform: scale(0.98);
+  background: #c73a52;
+}
+
+/* ========================================
+   Modals (shared)
+   ======================================== */
 .modal {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.7);
   display: flex;
   justify-content: center;
-  align-items: center;
+  align-items: flex-end;
   z-index: 100;
 }
 
@@ -152,10 +369,14 @@ nav {
 
 .modal-content {
   background: #16213e;
-  border-radius: 16px;
-  padding: 32px;
-  width: 90%;
-  max-width: 400px;
+  border-radius: 20px 20px 0 0;
+  padding: 28px 24px;
+  padding-bottom: max(28px, env(safe-area-inset-bottom));
+  width: 100%;
+  max-width: 480px;
+  max-height: 80vh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .modal-content h2 {
@@ -164,73 +385,539 @@ nav {
   color: #fff;
 }
 
-#activity-input {
+.modal-content input[type="text"] {
   width: 100%;
-  padding: 14px;
+  padding: 16px;
   border: 2px solid #0f3460;
-  border-radius: 8px;
+  border-radius: 12px;
   background: #1a1a2e;
   color: #eee;
-  font-size: 16px;
+  font-size: 17px;
   outline: none;
   transition: border-color 0.2s;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
-#activity-input:focus {
+.modal-content input[type="text"]:focus {
   border-color: #e94560;
 }
 
 #activity-suggestions {
   margin-top: 12px;
-  max-height: 200px;
+  max-height: 180px;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .suggestion {
-  padding: 10px 14px;
-  border-radius: 6px;
+  padding: 14px 16px;
+  border-radius: 8px;
   cursor: pointer;
   color: #ccc;
-  transition: background 0.15s;
+  font-size: 16px;
+  transition: background 0.1s;
 }
 
-.suggestion:hover {
+.suggestion:active {
   background: #0f3460;
   color: #fff;
 }
 
-#btn-save-activity {
+/* Primary button style (save, etc.) */
+#btn-save-activity,
+#btn-save-project,
+#btn-save-task {
   width: 100%;
   margin-top: 20px;
-  padding: 14px;
+  padding: 16px;
   border: none;
-  border-radius: 8px;
+  border-radius: 12px;
   background: #e94560;
   color: #fff;
-  font-size: 16px;
+  font-size: 17px;
+  font-weight: 500;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.15s;
+  min-height: 52px;
 }
 
-#btn-save-activity:hover {
+#btn-save-activity:active,
+#btn-save-project:active,
+#btn-save-task:active {
+  transform: scale(0.98);
   background: #c73a52;
 }
 
-/* Stats */
+/* Secondary button */
+.btn-secondary {
+  width: 100%;
+  margin-top: 16px;
+  padding: 16px;
+  border: 2px solid #0f3460;
+  border-radius: 12px;
+  background: transparent;
+  color: #ccc;
+  font-size: 17px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-height: 52px;
+}
+
+.btn-secondary:active {
+  background: #0f3460;
+}
+
+/* ========================================
+   Planera View
+   ======================================== */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.section-header h2 {
+  font-size: 20px;
+  color: #fff;
+}
+
+.btn-icon {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 10px;
+  background: #e94560;
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.btn-icon:active {
+  transform: scale(0.93);
+}
+
+.btn-tiny {
+  border: none;
+  border-radius: 6px;
+  background: #0f3460;
+  color: #8888aa;
+  font-size: 16px;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s;
+  flex-shrink: 0;
+}
+
+.btn-tiny:active {
+  background: #e94560;
+  color: #fff;
+}
+
+.divider {
+  border: none;
+  border-top: 1px solid #0f3460;
+  margin: 24px 0;
+}
+
+/* Schedule date navigation */
+#schedule-date-nav {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+#schedule-date-nav button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  background: #16213e;
+  color: #eee;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-height: 38px;
+  min-width: 38px;
+}
+
+#schedule-date-nav button:active {
+  transform: scale(0.95);
+}
+
+#schedule-date-nav button:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+#schedule-date-nav button:disabled:active {
+  transform: none;
+}
+
+#schedule-date-label {
+  font-size: 15px;
+  color: #ccc;
+  min-width: 150px;
+  text-align: center;
+}
+
+/* History schedule (read-only) */
+.schedule-item.history-item {
+  opacity: 0.7;
+  cursor: default;
+  touch-action: auto;
+}
+
+.schedule-item.history-item .schedule-drag-handle {
+  display: none;
+}
+
+.schedule-history-summary {
+  text-align: center;
+  color: #8888aa;
+  font-size: 14px;
+  padding: 8px 0;
+  margin-top: 4px;
+}
+
+/* Schedule */
+#schedule-section {
+  margin-bottom: 0;
+}
+
+#schedule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 20px;
+}
+
+#schedule-list.drop-active {
+  outline: 2px dashed rgba(83, 168, 182, 0.5);
+  outline-offset: 4px;
+  border-radius: 12px;
+  min-height: 60px;
+}
+
+.schedule-item {
+  background: #16213e;
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.schedule-item.done {
+  opacity: 0.5;
+}
+
+.schedule-item.dragging {
+  opacity: 0.2;
+}
+
+.schedule-drag-handle {
+  color: #555;
+  font-size: 18px;
+  cursor: grab;
+  flex-shrink: 0;
+  padding: 4px 2px;
+  line-height: 1;
+  touch-action: none;
+}
+
+.schedule-item-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.schedule-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.schedule-project {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.schedule-task {
+  font-size: 16px;
+  color: #eee;
+}
+
+.schedule-item-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.schedule-pom-count {
+  font-size: 14px;
+  color: #ccc;
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: center;
+}
+
+/* Drag ghost */
+.drag-ghost {
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+  opacity: 0.85;
+  transform: scale(1.03);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  border-radius: 10px;
+  background: #16213e;
+  padding: 10px 14px;
+  color: #eee;
+  font-size: 15px;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Drop placeholder in schedule */
+.schedule-drop-placeholder {
+  height: 4px;
+  background: #53a8b6;
+  border-radius: 2px;
+  margin: 2px 0;
+  transition: opacity 0.15s;
+}
+
+/* Task detail modal */
+#task-detail-modal textarea {
+  width: 100%;
+  padding: 16px;
+  border: 2px solid #0f3460;
+  border-radius: 12px;
+  background: #1a1a2e;
+  color: #eee;
+  font-size: 15px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s;
+  resize: vertical;
+  margin-top: 12px;
+  min-height: 100px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#task-detail-modal textarea:focus {
+  border-color: #e94560;
+}
+
+#btn-save-task-detail {
+  width: 100%;
+  margin-top: 20px;
+  padding: 16px;
+  border: none;
+  border-radius: 12px;
+  background: #e94560;
+  color: #fff;
+  font-size: 17px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-height: 52px;
+}
+
+#btn-save-task-detail:active {
+  transform: scale(0.98);
+  background: #c73a52;
+}
+
+/* Projects */
+#projects-section {
+  flex: 1;
+}
+
+#projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.project-card {
+  background: #16213e;
+  border-radius: 12px;
+  padding: 16px;
+  min-width: 0;
+}
+
+.project-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.project-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.project-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.task-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  background: #1a1a2e;
+  border-radius: 8px;
+  gap: 8px;
+  touch-action: none;
+  cursor: grab;
+}
+
+.task-item.in-schedule {
+  border: 1px solid rgba(83, 168, 182, 0.3);
+  background: rgba(83, 168, 182, 0.08);
+}
+
+.task-item.dragging {
+  opacity: 0.3;
+}
+
+.task-drag-handle {
+  color: #555;
+  font-size: 14px;
+  flex-shrink: 0;
+  line-height: 1;
+  padding: 2px 0;
+}
+
+.task-name {
+  font-size: 15px;
+  color: #ccc;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-item.in-schedule .task-name {
+  color: #9dd;
+}
+
+.task-scheduled-badge {
+  font-size: 10px;
+  color: #53a8b6;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+}
+
+.no-tasks {
+  font-size: 14px;
+  color: #555;
+  padding: 6px 0;
+}
+
+/* Schedule picker modal */
+.picker-project {
+  margin-bottom: 16px;
+}
+
+.picker-project-name {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.picker-tasks {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.picker-task {
+  padding: 14px 16px;
+  border: 2px solid #0f3460;
+  border-radius: 10px;
+  background: transparent;
+  color: #eee;
+  font-size: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.picker-task:active {
+  background: #0f3460;
+}
+
+.picker-task.added {
+  border-color: #53a8b6;
+  color: #53a8b6;
+  cursor: default;
+}
+
+/* ========================================
+   Stats View
+   ======================================== */
+#stats-view {
+  display: none;
+}
+
+#stats-view.active {
+  display: flex;
+  flex-direction: column;
+}
+
 #stats-tabs {
   display: flex;
   gap: 8px;
   margin-bottom: 20px;
+  flex-shrink: 0;
 }
 
 .stats-tab {
   flex: 1;
-  padding: 10px;
+  padding: 12px;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #16213e;
   color: #8888aa;
-  font-size: 14px;
+  font-size: 15px;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
 }
@@ -240,7 +927,7 @@ nav {
   color: #fff;
 }
 
-.stats-tab:hover:not(.active) {
+.stats-tab:active:not(.active) {
   background: #1a2744;
 }
 
@@ -250,21 +937,24 @@ nav {
   align-items: center;
   gap: 16px;
   margin-bottom: 24px;
+  flex-shrink: 0;
 }
 
 #stats-nav button {
-  padding: 8px 16px;
+  padding: 10px 20px;
   border: none;
-  border-radius: 6px;
+  border-radius: 8px;
   background: #16213e;
   color: #eee;
   font-size: 18px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.15s;
+  min-height: 44px;
+  min-width: 44px;
 }
 
-#stats-nav button:hover {
-  background: #1a2744;
+#stats-nav button:active {
+  transform: scale(0.95);
 }
 
 #stats-period-label {
@@ -276,10 +966,11 @@ nav {
 
 #stats-summary {
   background: #16213e;
-  border-radius: 12px;
-  padding: 20px;
+  border-radius: 14px;
+  padding: 24px;
   margin-bottom: 20px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 #stats-summary .total-time {
@@ -304,54 +995,76 @@ nav {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 20px;
 }
 
 .activity-row {
   background: #16213e;
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 16px;
 }
 
 .activity-row .activity-header {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .activity-row .activity-name {
-  font-size: 15px;
+  font-size: 16px;
   color: #eee;
 }
 
 .activity-row .activity-time {
-  font-size: 15px;
+  font-size: 16px;
   color: #e94560;
   font-weight: 600;
 }
 
 .activity-row .activity-bar-bg {
-  height: 6px;
+  height: 8px;
   background: #0f3460;
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
 }
 
 .activity-row .activity-bar {
   height: 100%;
   background: #e94560;
-  border-radius: 3px;
+  border-radius: 4px;
   transition: width 0.3s;
 }
 
 .activity-row .activity-sessions {
-  font-size: 12px;
+  font-size: 13px;
   color: #8888aa;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 
 .no-data {
   text-align: center;
   color: #8888aa;
   padding: 40px 0;
-  font-size: 15px;
+  font-size: 16px;
+}
+
+/* ========================================
+   Desktop: wider layout for projects
+   ======================================== */
+@media (min-width: 600px) {
+  #app {
+    max-width: 720px;
+  }
+
+  #projects-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .project-card {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 240px;
+  }
 }
