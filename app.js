@@ -469,6 +469,8 @@
   function renderProjects() {
     var projects = getProjects();
     var tasks = getTasks();
+    var schedule = getSchedule();
+    var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
 
     if (projects.length === 0) {
       projectsList.innerHTML = '<div class="no-data">Inga projekt &auml;nnu</div>';
@@ -478,8 +480,11 @@
     projectsList.innerHTML = projects.map(function (proj) {
       var projTasks = tasks.filter(function (t) { return t.projectId === proj.id; });
       var taskHtml = projTasks.map(function (task) {
-        return '<div class="task-item" data-task-id="' + task.id + '">' +
+        var inSchedule = scheduledTaskIds.indexOf(task.id) !== -1;
+        return '<div class="task-item' + (inSchedule ? ' in-schedule' : '') + '" data-task-id="' + task.id + '">' +
+          '<span class="task-drag-handle">&#9776;</span>' +
           '<span class="task-name">' + escapeHtml(task.name) + '</span>' +
+          (inSchedule ? '<span class="task-scheduled-badge">i schema</span>' : '') +
           '<button class="btn-delete-task btn-tiny" data-task-id="' + task.id + '">&times;</button>' +
           '</div>';
       }).join('');
@@ -517,6 +522,11 @@
       btn.addEventListener('click', function () {
         deleteTask(btn.dataset.taskId);
       });
+    });
+
+    // Task items: tap to edit, drag to schedule
+    projectsList.querySelectorAll('.task-item').forEach(function (el) {
+      initTaskDrag(el);
     });
   }
 
@@ -605,17 +615,18 @@
       var isDone = item.completed >= item.pomodoros;
 
       var color = getProjectColor(project);
-      return '<div class="schedule-item' + (isDone ? ' done' : '') + '" style="border-left:4px solid ' + color + '">' +
+      return '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-idx="' + idx + '" style="border-left:4px solid ' + color + '">' +
+        '<span class="schedule-drag-handle">&#9776;</span>' +
+        '<div class="schedule-item-body">' +
         '<div class="schedule-item-info">' +
         '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : '') + '</span>' +
         '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
+        '</div>' +
         '</div>' +
         '<div class="schedule-item-controls">' +
         '<button class="btn-pom-minus btn-tiny" data-idx="' + idx + '">&minus;</button>' +
         '<span class="schedule-pom-count">' + item.completed + '/' + item.pomodoros + '</span>' +
         '<button class="btn-pom-plus btn-tiny" data-idx="' + idx + '">+</button>' +
-        '<button class="btn-move-up btn-tiny" data-idx="' + idx + '">&uarr;</button>' +
-        '<button class="btn-move-down btn-tiny" data-idx="' + idx + '">&darr;</button>' +
         '<button class="btn-remove-schedule btn-tiny" data-idx="' + idx + '">&times;</button>' +
         '</div>' +
         '</div>';
@@ -632,20 +643,15 @@
         changePomCount(parseInt(btn.dataset.idx), 1);
       });
     });
-    scheduleList.querySelectorAll('.btn-move-up').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        moveScheduleItem(parseInt(btn.dataset.idx), -1);
-      });
-    });
-    scheduleList.querySelectorAll('.btn-move-down').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        moveScheduleItem(parseInt(btn.dataset.idx), 1);
-      });
-    });
     scheduleList.querySelectorAll('.btn-remove-schedule').forEach(function (btn) {
       btn.addEventListener('click', function () {
         removeScheduleItem(parseInt(btn.dataset.idx));
       });
+    });
+
+    // Drag handles for reorder
+    scheduleList.querySelectorAll('.schedule-drag-handle').forEach(function (handle) {
+      initScheduleDrag(handle);
     });
   }
 
@@ -655,25 +661,14 @@
     if (!item) return;
     item.pomodoros = Math.max(1, item.pomodoros + delta);
     saveSchedule(schedule);
-    renderSchedule();
-  }
-
-  function moveScheduleItem(idx, direction) {
-    var schedule = getSchedule();
-    var newIdx = idx + direction;
-    if (newIdx < 0 || newIdx >= schedule.items.length) return;
-    var temp = schedule.items[idx];
-    schedule.items[idx] = schedule.items[newIdx];
-    schedule.items[newIdx] = temp;
-    saveSchedule(schedule);
-    renderSchedule();
+    renderPlanView();
   }
 
   function removeScheduleItem(idx) {
     var schedule = getSchedule();
     schedule.items.splice(idx, 1);
     saveSchedule(schedule);
-    renderSchedule();
+    renderPlanView();
   }
 
   // --- Schedule picker ---
@@ -735,8 +730,297 @@
     saveSchedule(schedule);
   }
 
+  // ========================================
+  // Task detail modal
+  // ========================================
+  var taskDetailModal = document.getElementById('task-detail-modal');
+  var taskDetailName = document.getElementById('task-detail-name');
+  var taskDetailDesc = document.getElementById('task-detail-desc');
+  var btnSaveTaskDetail = document.getElementById('btn-save-task-detail');
+  var editingTaskId = null;
+
+  function openTaskDetail(taskId) {
+    var tasks = getTasks();
+    var task = tasks.filter(function (t) { return t.id === taskId; })[0];
+    if (!task) return;
+    editingTaskId = taskId;
+    taskDetailName.value = task.name;
+    taskDetailDesc.value = task.description || '';
+    taskDetailModal.classList.remove('hidden');
+    taskDetailName.focus();
+  }
+
+  btnSaveTaskDetail.addEventListener('click', saveTaskDetail);
+  taskDetailName.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      taskDetailDesc.focus();
+    }
+  });
+
+  function saveTaskDetail() {
+    if (!editingTaskId) return;
+    var name = taskDetailName.value.trim();
+    if (!name) return;
+    var tasks = getTasks();
+    for (var i = 0; i < tasks.length; i++) {
+      if (tasks[i].id === editingTaskId) {
+        tasks[i].name = name;
+        tasks[i].description = taskDetailDesc.value.trim();
+        break;
+      }
+    }
+    saveTasks(tasks);
+    taskDetailModal.classList.add('hidden');
+    editingTaskId = null;
+    renderPlanView();
+  }
+
+  // ========================================
+  // Drag and drop system
+  // ========================================
+  var drag = {
+    active: false,
+    started: false,
+    type: null,       // 'task-to-schedule' or 'schedule-reorder'
+    taskId: null,
+    sourceIdx: null,
+    sourceEl: null,
+    ghost: null,
+    startX: 0,
+    startY: 0,
+    threshold: 8
+  };
+
+  function createGhost(text, color) {
+    var el = document.createElement('div');
+    el.className = 'drag-ghost';
+    if (color) el.style.borderLeft = '4px solid ' + color;
+    el.textContent = text;
+    document.body.appendChild(el);
+    return el;
+  }
+
+  function cleanupDrag() {
+    if (drag.ghost) {
+      drag.ghost.remove();
+      drag.ghost = null;
+    }
+    if (drag.sourceEl) {
+      drag.sourceEl.classList.remove('dragging');
+      drag.sourceEl = null;
+    }
+    scheduleList.classList.remove('drop-active');
+    // Remove any placeholders
+    var phs = scheduleList.querySelectorAll('.schedule-drop-placeholder');
+    phs.forEach(function (p) { p.remove(); });
+    drag.active = false;
+    drag.started = false;
+    drag.type = null;
+  }
+
+  // --- Task drag (project → schedule) ---
+  function initTaskDrag(el) {
+    var taskId = el.dataset.taskId;
+
+    function onStart(clientX, clientY, e) {
+      // Don't drag from delete button
+      if (e.target.classList.contains('btn-delete-task') || e.target.classList.contains('btn-tiny')) return;
+      drag.active = true;
+      drag.started = false;
+      drag.type = 'task-to-schedule';
+      drag.taskId = taskId;
+      drag.sourceEl = el;
+      drag.startX = clientX;
+      drag.startY = clientY;
+    }
+
+    el.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) return;
+      var t = e.touches[0];
+      onStart(t.clientX, t.clientY, e);
+    }, { passive: true });
+
+    el.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      onStart(e.clientX, e.clientY, e);
+    });
+  }
+
+  // --- Schedule drag (reorder) ---
+  function initScheduleDrag(handle) {
+    var item = handle.closest('.schedule-item');
+    var idx = parseInt(item.dataset.idx);
+
+    function onStart(clientX, clientY) {
+      drag.active = true;
+      drag.started = false;
+      drag.type = 'schedule-reorder';
+      drag.sourceIdx = idx;
+      drag.sourceEl = item;
+      drag.startX = clientX;
+      drag.startY = clientY;
+    }
+
+    handle.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) return;
+      var t = e.touches[0];
+      onStart(t.clientX, t.clientY);
+      e.preventDefault();
+    }, { passive: false });
+
+    handle.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      onStart(e.clientX, e.clientY);
+      e.preventDefault();
+    });
+  }
+
+  // --- Global move handler ---
+  function onDragMove(clientX, clientY, e) {
+    if (!drag.active) return;
+
+    var dx = clientX - drag.startX;
+    var dy = clientY - drag.startY;
+
+    if (!drag.started) {
+      if (Math.sqrt(dx * dx + dy * dy) < drag.threshold) return;
+      drag.started = true;
+      drag.sourceEl.classList.add('dragging');
+
+      if (drag.type === 'task-to-schedule') {
+        var tasks = getTasks();
+        var projects = getProjects();
+        var task = tasks.filter(function (t) { return t.id === drag.taskId; })[0];
+        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+        var color = getProjectColor(project);
+        drag.ghost = createGhost(task ? task.name : '', color);
+        scheduleList.classList.add('drop-active');
+        scheduleEmpty.classList.add('hidden');
+      } else {
+        var taskText = drag.sourceEl.querySelector('.schedule-task');
+        drag.ghost = createGhost(taskText ? taskText.textContent : '', null);
+      }
+    }
+
+    if (!drag.started) return;
+    if (e && e.cancelable) e.preventDefault();
+
+    drag.ghost.style.left = (clientX + 12) + 'px';
+    drag.ghost.style.top = (clientY - 20) + 'px';
+
+    if (drag.type === 'schedule-reorder') {
+      updateReorderPlaceholder(clientY);
+    }
+  }
+
+  function updateReorderPlaceholder(clientY) {
+    // Remove old placeholders
+    var old = scheduleList.querySelectorAll('.schedule-drop-placeholder');
+    old.forEach(function (p) { p.remove(); });
+
+    var items = scheduleList.querySelectorAll('.schedule-item');
+    var insertBefore = null;
+
+    for (var i = 0; i < items.length; i++) {
+      var rect = items[i].getBoundingClientRect();
+      var midY = rect.top + rect.height / 2;
+      if (clientY < midY) {
+        insertBefore = items[i];
+        break;
+      }
+    }
+
+    var ph = document.createElement('div');
+    ph.className = 'schedule-drop-placeholder';
+    if (insertBefore) {
+      scheduleList.insertBefore(ph, insertBefore);
+    } else {
+      scheduleList.appendChild(ph);
+    }
+  }
+
+  // --- Global end handler ---
+  function onDragEnd(clientX, clientY) {
+    if (!drag.active) return;
+
+    if (drag.started) {
+      if (drag.type === 'task-to-schedule') {
+        // Check if dropped over schedule area
+        var scheduleRect = document.getElementById('schedule-section').getBoundingClientRect();
+        var overSchedule = clientY >= scheduleRect.top - 40 && clientY <= scheduleRect.bottom + 40;
+        if (overSchedule) {
+          addToSchedule(drag.taskId);
+          renderSchedule();
+          renderProjects();
+        }
+      } else if (drag.type === 'schedule-reorder') {
+        // Determine new index from placeholder position
+        var items = scheduleList.querySelectorAll('.schedule-item');
+        var ph = scheduleList.querySelector('.schedule-drop-placeholder');
+        var newIdx = 0;
+
+        if (ph) {
+          // Count schedule-items before placeholder
+          var sibling = scheduleList.firstChild;
+          var count = 0;
+          while (sibling) {
+            if (sibling === ph) break;
+            if (sibling.classList && sibling.classList.contains('schedule-item')) count++;
+            sibling = sibling.nextSibling;
+          }
+          newIdx = count;
+        }
+
+        var schedule = getSchedule();
+        var fromIdx = drag.sourceIdx;
+        if (fromIdx !== newIdx && fromIdx !== newIdx - 1) {
+          // Adjust: if moving down, account for removal
+          var removed = schedule.items.splice(fromIdx, 1)[0];
+          var targetIdx = fromIdx < newIdx ? newIdx - 1 : newIdx;
+          schedule.items.splice(targetIdx, 0, removed);
+          saveSchedule(schedule);
+        }
+        renderSchedule();
+      }
+    } else if (drag.type === 'task-to-schedule' && drag.taskId) {
+      // Wasn't a drag (no movement) → open task detail
+      openTaskDetail(drag.taskId);
+    }
+
+    cleanupDrag();
+  }
+
+  // Touch events
+  document.addEventListener('touchmove', function (e) {
+    if (!drag.active) return;
+    var t = e.touches[0];
+    onDragMove(t.clientX, t.clientY, e);
+  }, { passive: false });
+
+  document.addEventListener('touchend', function (e) {
+    if (!drag.active) return;
+    var t = e.changedTouches[0];
+    onDragEnd(t.clientX, t.clientY);
+  });
+
+  document.addEventListener('touchcancel', function () {
+    if (drag.active) cleanupDrag();
+  });
+
+  // Mouse events (for desktop)
+  document.addEventListener('mousemove', function (e) {
+    if (!drag.active) return;
+    onDragMove(e.clientX, e.clientY, e);
+  });
+
+  document.addEventListener('mouseup', function (e) {
+    if (!drag.active) return;
+    onDragEnd(e.clientX, e.clientY);
+  });
+
   // Close modals on backdrop click
-  [logModal, scheduleModal, projectModal, taskModal].forEach(function (modal) {
+  [logModal, scheduleModal, projectModal, taskModal, taskDetailModal].forEach(function (modal) {
     modal.addEventListener('click', function (e) {
       if (e.target === modal) {
         modal.classList.add('hidden');

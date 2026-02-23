@@ -53,7 +53,7 @@
           <button id="btn-add-to-schedule" class="btn-icon">+</button>
         </div>
         <div id="schedule-list"></div>
-        <div id="schedule-empty" class="no-data">Tryck + f&ouml;r att l&auml;gga till uppgifter</div>
+        <div id="schedule-empty" class="no-data">Dra uppgifter hit eller tryck +</div>
       </div>
 
       <hr class="divider">
@@ -92,6 +92,16 @@
         <h2>Ny uppgift</h2>
         <input type="text" id="task-name-input" placeholder="Uppgiftsnamn..." autocomplete="off">
         <button id="btn-save-task">Spara</button>
+      </div>
+    </div>
+
+    <!-- Task detail modal -->
+    <div id="task-detail-modal" class="modal hidden">
+      <div class="modal-content">
+        <h2>Redigera uppgift</h2>
+        <input type="text" id="task-detail-name" placeholder="Uppgiftsnamn..." autocomplete="off">
+        <textarea id="task-detail-desc" placeholder="Beskrivning (valfritt)..." rows="4"></textarea>
+        <button id="btn-save-task-detail">Spara</button>
       </div>
     </div>
 
