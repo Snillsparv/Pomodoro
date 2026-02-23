@@ -1,11 +1,12 @@
-var CACHE_NAME = 'pomodoro-v1';
+var CACHE_NAME = 'pomodoro-v2';
 var ASSETS = [
   './',
   './index.html',
   './style.css',
   './app.js',
   './icon.svg',
-  './manifest.json'
+  './manifest.json',
+  './bg_create.png'
 ];
 
 self.addEventListener('install', function (e) {
