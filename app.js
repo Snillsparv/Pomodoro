@@ -385,7 +385,7 @@
     updatePomodoroCount();
   }
 
-  // --- Alarm sound via Web Audio API ---
+  // --- Alarm sound (Web Audio API + <audio> fallback for background tabs) ---
   var audioCtx = null;
 
   function getAudioCtx() {
@@ -395,15 +395,98 @@
     return audioCtx;
   }
 
-  function playAlarm(type) {
-    var ctx;
-    try { ctx = getAudioCtx(); } catch (e) { return; }
+  // Generate a tiny WAV file in memory for a sequence of tones
+  function generateWav(tones, sampleRate) {
+    sampleRate = sampleRate || 22050;
+    var totalSamples = 0;
+    tones.forEach(function (t) { totalSamples += Math.ceil((t.delay + t.duration) * sampleRate); });
+    // Use the longest tone end as total length
+    var maxEnd = 0;
+    tones.forEach(function (t) { var end = t.delay + t.duration + 0.02; if (end > maxEnd) maxEnd = end; });
+    var numSamples = Math.ceil(maxEnd * sampleRate);
+    var samples = new Float32Array(numSamples);
 
-    // Work done: rising two-tone chime, Break done: softer single ping
+    tones.forEach(function (t) {
+      var startSample = Math.floor(t.delay * sampleRate);
+      var durSamples = Math.ceil(t.duration * sampleRate);
+      for (var i = 0; i < durSamples; i++) {
+        var env = 1 - (i / durSamples); // linear fade out
+        if (i < sampleRate * 0.02) env *= i / (sampleRate * 0.02); // fade in
+        samples[startSample + i] += Math.sin(2 * Math.PI * t.freq * i / sampleRate) * t.volume * env;
+      }
+    });
+
+    // Encode as 16-bit PCM WAV
+    var buffer = new ArrayBuffer(44 + numSamples * 2);
+    var view = new DataView(buffer);
+    function writeStr(offset, s) { for (var i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i)); }
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + numSamples * 2, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeStr(36, 'data');
+    view.setUint32(40, numSamples * 2, true);
+    for (var i = 0; i < numSamples; i++) {
+      var s = Math.max(-1, Math.min(1, samples[i]));
+      view.setInt16(44 + i * 2, s * 0x7FFF, true);
+    }
+    return new Blob([buffer], { type: 'audio/wav' });
+  }
+
+  // Pre-generate alarm WAV blobs so they're ready instantly
+  var alarmBlobs = {
+    work: generateWav([
+      { freq: 660, duration: 0.18, delay: 0, volume: 0.5 },
+      { freq: 880, duration: 0.18, delay: 0.2, volume: 0.5 },
+      { freq: 1100, duration: 0.15, delay: 0.4, volume: 0.6 }
+    ]),
+    break: generateWav([
+      { freq: 520, duration: 0.14, delay: 0, volume: 0.4 },
+      { freq: 680, duration: 0.14, delay: 0.15, volume: 0.4 }
+    ]),
+    start: generateWav([
+      { freq: 440, duration: 0.1, delay: 0, volume: 0.25 },
+      { freq: 560, duration: 0.12, delay: 0.12, volume: 0.3 }
+    ])
+  };
+  var alarmUrls = {};
+  Object.keys(alarmBlobs).forEach(function (k) {
+    alarmUrls[k] = URL.createObjectURL(alarmBlobs[k]);
+  });
+
+  function playAlarm(type) {
+    // Primary: <audio> element — works reliably in background tabs
+    try {
+      var audio = new Audio(alarmUrls[type] || alarmUrls.work);
+      audio.play().catch(function () {});
+    } catch (e) { /* ignore */ }
+
+    // Secondary: Web Audio API — better quality when tab is in foreground
+    try {
+      var ctx = getAudioCtx();
+      if (ctx.state === 'suspended') {
+        ctx.resume().then(function () { playTones(ctx, type); });
+      } else {
+        playTones(ctx, type);
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function playTones(ctx, type) {
     if (type === 'work') {
       playTone(ctx, 660, 0.18, 0, 0.25);
       playTone(ctx, 880, 0.18, 0.2, 0.25);
       playTone(ctx, 1100, 0.15, 0.4, 0.3);
+    } else if (type === 'start') {
+      playTone(ctx, 440, 0.1, 0, 0.12);
+      playTone(ctx, 560, 0.12, 0.12, 0.15);
     } else {
       playTone(ctx, 520, 0.14, 0, 0.2);
       playTone(ctx, 680, 0.14, 0.15, 0.2);
@@ -515,6 +598,8 @@
       var ctx = getAudioCtx();
       if (ctx.state === 'suspended') ctx.resume();
     } catch (e) { /* ignore */ }
+    // Play start sound (only for work sessions, not breaks)
+    if (!isBreak) playAlarm('start');
     isRunning = true;
     btnStart.disabled = true;
     btnPause.disabled = false;
