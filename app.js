@@ -113,20 +113,51 @@
     saveScheduleHistory(history);
   }
 
+  // Migrate old format {taskId, pomodoros, completed} → new {taskId, done}
+  function migrateScheduleItems(items) {
+    if (!items || items.length === 0) return items;
+    if (typeof items[0].done !== 'undefined') return items;
+    var newItems = [];
+    for (var i = 0; i < items.length; i++) {
+      var poms = items[i].pomodoros || 1;
+      var completed = items[i].completed || 0;
+      for (var j = 0; j < poms; j++) {
+        newItems.push({ taskId: items[i].taskId, done: j < completed });
+      }
+    }
+    return newItems;
+  }
+
+  // Group flat items by taskId for plan view display
+  function groupScheduleItems(items) {
+    var groups = [];
+    var seen = {};
+    for (var i = 0; i < items.length; i++) {
+      var tid = items[i].taskId;
+      if (!seen[tid]) {
+        seen[tid] = { taskId: tid, total: 0, completed: 0 };
+        groups.push(seen[tid]);
+      }
+      seen[tid].total++;
+      if (items[i].done) seen[tid].completed++;
+    }
+    return groups;
+  }
+
   function getSchedule() {
     var data = JSON.parse(localStorage.getItem('pomodoro_schedule') || '{}');
     if (data.date !== todayStr()) {
-      // Archive the old schedule before replacing
       archiveSchedule(data);
       return { date: todayStr(), items: [] };
     }
+    data.items = migrateScheduleItems(data.items);
     return data;
   }
 
   function getScheduleForDate(dateStr) {
     if (dateStr === todayStr()) return getSchedule();
     var history = getScheduleHistory();
-    return { date: dateStr, items: history[dateStr] || [] };
+    return { date: dateStr, items: migrateScheduleItems(history[dateStr] || []) };
   }
 
   function saveSchedule(schedule) {
@@ -203,10 +234,10 @@
       return;
     }
 
-    // Find first incomplete item
+    // Find first not-done item
     var idx = -1;
     for (var i = 0; i < schedule.items.length; i++) {
-      if (schedule.items[i].completed < schedule.items[i].pomodoros) {
+      if (!schedule.items[i].done) {
         idx = i;
         break;
       }
@@ -229,7 +260,15 @@
 
     var projectName = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
     var taskName = task ? task.name : 'Okänd uppgift';
-    var progress = item.completed + '/' + item.pomodoros;
+    // Compute progress for this task across all items
+    var totalForTask = 0, completedForTask = 0;
+    for (var j = 0; j < schedule.items.length; j++) {
+      if (schedule.items[j].taskId === item.taskId) {
+        totalForTask++;
+        if (schedule.items[j].done) completedForTask++;
+      }
+    }
+    var progress = completedForTask + '/' + totalForTask;
     var color = getProjectColor(project);
 
     currentTaskBanner.style.borderLeft = '4px solid ' + color;
@@ -241,8 +280,6 @@
     renderTimerSchedule();
   }
 
-  var TS_BASE_HEIGHT = 38;
-
   function renderTimerSchedule() {
     var schedule = getSchedule();
     var tasks = getTasks();
@@ -253,10 +290,10 @@
       return;
     }
 
-    // Find current (first incomplete) index
+    // Find current (first not-done) index
     var currentIdx = -1;
     for (var i = 0; i < schedule.items.length; i++) {
-      if (schedule.items[i].completed < schedule.items[i].pomodoros) {
+      if (!schedule.items[i].done) {
         currentIdx = i;
         break;
       }
@@ -266,27 +303,33 @@
       var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
       var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
       var color = getProjectColor(project);
-      var isDone = item.completed >= item.pomodoros;
 
       var cls = 'ts-item';
-      if (isDone) cls += ' ts-done';
+      if (item.done) cls += ' ts-done';
       else if (idx === currentIdx) cls += ' ts-current';
       else cls += ' ts-upcoming';
 
-      var indicator = isDone
+      var indicator = item.done
         ? '<span class="ts-check">&check;</span>'
         : '<span class="ts-dot" style="background:' + color + '"></span>';
 
       var taskName = task ? task.name : 'Borttagen';
-      var progress = item.completed + '/' + item.pomodoros;
-      var height = TS_BASE_HEIGHT * item.pomodoros;
+      var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
 
-      return '<div class="' + cls + '" data-idx="' + idx + '" style="min-height:' + height + 'px">' +
+      return '<div class="' + cls + '" data-idx="' + idx + '">' +
         indicator +
         '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
-        '<span class="ts-pom">' + progress + '</span>' +
+        addBtn +
         '</div>';
     }).join('');
+
+    // + button: add another pomodoro after this one
+    timerSchedule.querySelectorAll('.ts-add-pom').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        addPomodoroAfter(parseInt(btn.dataset.idx));
+      });
+    });
 
     // Timer schedule drag reorder
     timerSchedule.querySelectorAll('.ts-item').forEach(function (el) {
@@ -294,10 +337,20 @@
     });
   }
 
+  function addPomodoroAfter(idx) {
+    var schedule = getSchedule();
+    if (idx < 0 || idx >= schedule.items.length) return;
+    var taskId = schedule.items[idx].taskId;
+    schedule.items.splice(idx + 1, 0, { taskId: taskId, done: false });
+    saveSchedule(schedule);
+    updateTaskBanner();
+  }
+
   function initTimerScheduleDrag(el) {
     var idx = parseInt(el.dataset.idx);
 
-    function onStart(clientX, clientY) {
+    function onStart(clientX, clientY, e) {
+      if (e.target.closest('.ts-add-pom')) return;
       drag.active = true;
       drag.started = false;
       drag.type = 'timer-reorder';
@@ -310,12 +363,12 @@
     el.addEventListener('touchstart', function (e) {
       if (e.touches.length !== 1) return;
       var t = e.touches[0];
-      onStart(t.clientX, t.clientY);
+      onStart(t.clientX, t.clientY, e);
     }, { passive: true });
 
     el.addEventListener('mousedown', function (e) {
       if (e.button !== 0) return;
-      onStart(e.clientX, e.clientY);
+      onStart(e.clientX, e.clientY, e);
     });
   }
 
@@ -439,8 +492,8 @@
     });
     saveSessions(sessions);
 
-    // Update schedule progress
-    item.completed++;
+    // Mark this pomodoro as done
+    item.done = true;
     saveSchedule(schedule);
 
     todayPomodoros++;
@@ -810,8 +863,9 @@
     var schedule = isToday ? getSchedule() : getScheduleForDate(viewDate);
     var tasks = getTasks();
     var projects = getProjects();
+    var groups = groupScheduleItems(schedule.items);
 
-    if (schedule.items.length === 0) {
+    if (groups.length === 0) {
       scheduleList.innerHTML = '';
       scheduleEmpty.classList.remove('hidden');
       scheduleEmpty.textContent = isToday ? 'Dra uppgifter hit eller tryck +' : 'Inget schema denna dag';
@@ -821,14 +875,14 @@
     scheduleEmpty.classList.add('hidden');
 
     if (isToday) {
-      // Editable today view
-      scheduleList.innerHTML = schedule.items.map(function (item, idx) {
-        var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
+      // Editable today view — grouped by task
+      scheduleList.innerHTML = groups.map(function (group, gIdx) {
+        var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
         var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-        var isDone = item.completed >= item.pomodoros;
+        var isDone = group.completed >= group.total;
 
         var color = getProjectColor(project);
-        return '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-idx="' + idx + '" style="border-left:4px solid ' + color + '">' +
+        return '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + '">' +
           '<span class="schedule-drag-handle">&#9776;</span>' +
           '<div class="schedule-item-body">' +
           '<div class="schedule-item-info">' +
@@ -837,10 +891,10 @@
           '</div>' +
           '</div>' +
           '<div class="schedule-item-controls">' +
-          '<button class="btn-pom-minus btn-tiny" data-idx="' + idx + '">&minus;</button>' +
-          '<span class="schedule-pom-count">' + item.completed + '/' + item.pomodoros + '</span>' +
-          '<button class="btn-pom-plus btn-tiny" data-idx="' + idx + '">+</button>' +
-          '<button class="btn-remove-schedule btn-tiny" data-idx="' + idx + '">&times;</button>' +
+          '<button class="btn-pom-minus btn-tiny" data-task-id="' + group.taskId + '">&minus;</button>' +
+          '<span class="schedule-pom-count">' + group.completed + '/' + group.total + '</span>' +
+          '<button class="btn-pom-plus btn-tiny" data-task-id="' + group.taskId + '">+</button>' +
+          '<button class="btn-remove-schedule btn-tiny" data-task-id="' + group.taskId + '">&times;</button>' +
           '</div>' +
           '</div>';
       }).join('');
@@ -848,17 +902,17 @@
       // Event listeners
       scheduleList.querySelectorAll('.btn-pom-minus').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          changePomCount(parseInt(btn.dataset.idx), -1);
+          changePomCount(btn.dataset.taskId, -1);
         });
       });
       scheduleList.querySelectorAll('.btn-pom-plus').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          changePomCount(parseInt(btn.dataset.idx), 1);
+          changePomCount(btn.dataset.taskId, 1);
         });
       });
       scheduleList.querySelectorAll('.btn-remove-schedule').forEach(function (btn) {
         btn.addEventListener('click', function () {
-          removeScheduleItem(parseInt(btn.dataset.idx));
+          removeScheduleItem(btn.dataset.taskId);
         });
       });
 
@@ -867,16 +921,11 @@
         initScheduleDrag(item);
       });
     } else {
-      // Read-only history view
-      var totalCompleted = 0;
-      var totalPomodoros = 0;
-
-      scheduleList.innerHTML = schedule.items.map(function (item) {
-        var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
+      // Read-only history view — grouped
+      scheduleList.innerHTML = groups.map(function (group) {
+        var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
         var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-        var isDone = item.completed >= item.pomodoros;
-        totalCompleted += item.completed;
-        totalPomodoros += item.pomodoros;
+        var isDone = group.completed >= group.total;
 
         var color = getProjectColor(project);
         return '<div class="schedule-item history-item' + (isDone ? ' done' : '') + '" style="border-left:4px solid ' + color + '">' +
@@ -886,29 +935,62 @@
           '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
           '</div>' +
           '</div>' +
-          '<span class="schedule-pom-count">' + item.completed + '/' + item.pomodoros + '</span>' +
+          '<span class="schedule-pom-count">' + group.completed + '/' + group.total + '</span>' +
           '</div>';
       }).join('');
 
       // Summary
+      var totalCompleted = 0, totalPomodoros = 0;
+      for (var i = 0; i < groups.length; i++) {
+        totalCompleted += groups[i].completed;
+        totalPomodoros += groups[i].total;
+      }
       scheduleList.innerHTML += '<div class="schedule-history-summary">' +
         totalCompleted + '/' + totalPomodoros + ' pomodoros avklarade' +
         '</div>';
     }
   }
 
-  function changePomCount(idx, delta) {
+  function changePomCount(taskId, delta) {
     var schedule = getSchedule();
-    var item = schedule.items[idx];
-    if (!item) return;
-    item.pomodoros = Math.max(1, item.pomodoros + delta);
+    if (delta > 0) {
+      // Add a new pomodoro after the last one for this task
+      var lastIdx = -1;
+      for (var i = schedule.items.length - 1; i >= 0; i--) {
+        if (schedule.items[i].taskId === taskId) { lastIdx = i; break; }
+      }
+      if (lastIdx >= 0) {
+        schedule.items.splice(lastIdx + 1, 0, { taskId: taskId, done: false });
+      }
+    } else {
+      // Remove last undone pomodoro for this task; if all done, remove last done
+      var total = 0;
+      for (var i = 0; i < schedule.items.length; i++) {
+        if (schedule.items[i].taskId === taskId) total++;
+      }
+      if (total <= 1) return; // Don't remove last one
+      var removeIdx = -1;
+      for (var i = schedule.items.length - 1; i >= 0; i--) {
+        if (schedule.items[i].taskId === taskId && !schedule.items[i].done) {
+          removeIdx = i;
+          break;
+        }
+      }
+      if (removeIdx === -1) {
+        // All done — remove last done
+        for (var i = schedule.items.length - 1; i >= 0; i--) {
+          if (schedule.items[i].taskId === taskId) { removeIdx = i; break; }
+        }
+      }
+      if (removeIdx >= 0) schedule.items.splice(removeIdx, 1);
+    }
     saveSchedule(schedule);
     renderPlanView();
   }
 
-  function removeScheduleItem(idx) {
+  function removeScheduleItem(taskId) {
     var schedule = getSchedule();
-    schedule.items.splice(idx, 1);
+    schedule.items = schedule.items.filter(function (item) { return item.taskId !== taskId; });
     saveSchedule(schedule);
     renderPlanView();
   }
@@ -968,7 +1050,7 @@
     for (var i = 0; i < schedule.items.length; i++) {
       if (schedule.items[i].taskId === taskId) return;
     }
-    schedule.items.push({ taskId: taskId, pomodoros: 1, completed: 0 });
+    schedule.items.push({ taskId: taskId, done: false });
     saveSchedule(schedule);
   }
 
@@ -1089,16 +1171,16 @@
     });
   }
 
-  // --- Schedule drag (reorder) ---
+  // --- Schedule drag (reorder by task group) ---
   function initScheduleDrag(item) {
-    var idx = parseInt(item.dataset.idx);
+    var taskId = item.dataset.taskId;
 
     function onStart(clientX, clientY, e) {
       if (e.target.closest('.btn-tiny')) return;
       drag.active = true;
       drag.started = false;
       drag.type = 'schedule-reorder';
-      drag.sourceIdx = idx;
+      drag.taskId = taskId;
       drag.sourceEl = item;
       drag.startX = clientX;
       drag.startY = clientY;
@@ -1198,24 +1280,35 @@
           renderSchedule();
           renderProjects();
         }
-      } else if (drag.type === 'schedule-reorder' || drag.type === 'timer-reorder') {
-        var container = drag.type === 'schedule-reorder' ? scheduleList : timerSchedule;
-        var itemCls = drag.type === 'schedule-reorder' ? 'schedule-item' : 'ts-item';
-        var phCls = drag.type === 'schedule-reorder' ? 'schedule-drop-placeholder' : 'ts-drop-placeholder';
-        var ph = container.querySelector('.' + phCls);
-        var newIdx = 0;
-
+      } else if (drag.type === 'schedule-reorder') {
+        // Group-based reorder in plan view
+        var ph = scheduleList.querySelector('.schedule-drop-placeholder');
+        var newGroupIdx = 0;
         if (ph) {
-          var sibling = container.firstChild;
+          var sibling = scheduleList.firstChild;
           var count = 0;
           while (sibling) {
             if (sibling === ph) break;
-            if (sibling.classList && sibling.classList.contains(itemCls)) count++;
+            if (sibling.classList && sibling.classList.contains('schedule-item')) count++;
+            sibling = sibling.nextSibling;
+          }
+          newGroupIdx = count;
+        }
+        reorderScheduleGroups(drag.taskId, newGroupIdx);
+      } else if (drag.type === 'timer-reorder') {
+        // Individual item reorder in timer view
+        var ph = timerSchedule.querySelector('.ts-drop-placeholder');
+        var newIdx = 0;
+        if (ph) {
+          var sibling = timerSchedule.firstChild;
+          var count = 0;
+          while (sibling) {
+            if (sibling === ph) break;
+            if (sibling.classList && sibling.classList.contains('ts-item')) count++;
             sibling = sibling.nextSibling;
           }
           newIdx = count;
         }
-
         var schedule = getSchedule();
         var fromIdx = drag.sourceIdx;
         if (fromIdx !== newIdx && fromIdx !== newIdx - 1) {
@@ -1224,11 +1317,7 @@
           schedule.items.splice(targetIdx, 0, removed);
           saveSchedule(schedule);
         }
-        if (drag.type === 'schedule-reorder') {
-          renderSchedule();
-        } else {
-          updateTaskBanner();
-        }
+        updateTaskBanner();
       }
     } else if (drag.type === 'task-to-schedule' && drag.taskId) {
       // Wasn't a drag (no movement) → open task detail
@@ -1236,6 +1325,49 @@
     }
 
     cleanupDrag();
+  }
+
+  function reorderScheduleGroups(draggedTaskId, newGroupIdx) {
+    var schedule = getSchedule();
+    // Build current group order (unique taskIds by first occurrence)
+    var groupOrder = [];
+    var seen = {};
+    for (var i = 0; i < schedule.items.length; i++) {
+      var tid = schedule.items[i].taskId;
+      if (!seen[tid]) {
+        seen[tid] = true;
+        groupOrder.push(tid);
+      }
+    }
+    var oldIdx = groupOrder.indexOf(draggedTaskId);
+    if (oldIdx === -1) return;
+    if (oldIdx === newGroupIdx || oldIdx === newGroupIdx - 1) {
+      renderSchedule();
+      return;
+    }
+    // Remove from old position and insert at new
+    groupOrder.splice(oldIdx, 1);
+    var targetIdx = oldIdx < newGroupIdx ? newGroupIdx - 1 : newGroupIdx;
+    groupOrder.splice(targetIdx, 0, draggedTaskId);
+    // Rebuild items array in new group order
+    var itemsByTask = {};
+    for (var i = 0; i < schedule.items.length; i++) {
+      var tid = schedule.items[i].taskId;
+      if (!itemsByTask[tid]) itemsByTask[tid] = [];
+      itemsByTask[tid].push(schedule.items[i]);
+    }
+    var newItems = [];
+    for (var i = 0; i < groupOrder.length; i++) {
+      var taskItems = itemsByTask[groupOrder[i]];
+      if (taskItems) {
+        for (var j = 0; j < taskItems.length; j++) {
+          newItems.push(taskItems[j]);
+        }
+      }
+    }
+    schedule.items = newItems;
+    saveSchedule(schedule);
+    renderSchedule();
   }
 
   // Touch events
@@ -1304,7 +1436,7 @@
 
     // Add to schedule
     var schedule = getSchedule();
-    schedule.items.push({ taskId: taskId, pomodoros: 1, completed: 0 });
+    schedule.items.push({ taskId: taskId, done: false });
     saveSchedule(schedule);
 
     quickAddModal.classList.add('hidden');

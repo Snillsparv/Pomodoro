@@ -278,11 +278,9 @@ nav {
   font-weight: 500;
 }
 
-.ts-pom {
-  font-size: 13px;
-  color: #8888aa;
-  font-variant-numeric: tabular-nums;
+.ts-add-pom {
   flex-shrink: 0;
+  font-size: 14px;
 }
 
 .ts-drop-placeholder {
