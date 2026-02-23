@@ -438,11 +438,17 @@ nav {
   flex: 1;
 }
 
+#projects-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .project-card {
   background: #16213e;
   border-radius: 12px;
   padding: 16px;
-  margin-bottom: 12px;
+  min-width: 0;
 }
 
 .project-header {
@@ -688,4 +694,23 @@ nav {
   color: #8888aa;
   padding: 40px 0;
   font-size: 16px;
+}
+
+/* ========================================
+   Desktop: wider layout for projects
+   ======================================== */
+@media (min-width: 600px) {
+  #app {
+    max-width: 720px;
+  }
+
+  #projects-list {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .project-card {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 240px;
+  }
 }

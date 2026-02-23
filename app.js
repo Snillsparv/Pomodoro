@@ -832,6 +832,32 @@
   // ========================================
   // Init
   // ========================================
+
+  // Migrate: assign colors to projects that don't have one
+  (function migrateProjectColors() {
+    var projects = getProjects();
+    var changed = false;
+    var usedColors = projects.map(function (p) { return p.color; }).filter(Boolean);
+    for (var i = 0; i < projects.length; i++) {
+      if (!projects[i].color) {
+        // Pick first unused color
+        for (var c = 0; c < PROJECT_COLORS.length; c++) {
+          if (usedColors.indexOf(PROJECT_COLORS[c]) === -1) {
+            projects[i].color = PROJECT_COLORS[c];
+            usedColors.push(PROJECT_COLORS[c]);
+            changed = true;
+            break;
+          }
+        }
+        if (!projects[i].color) {
+          projects[i].color = PROJECT_COLORS[i % PROJECT_COLORS.length];
+          changed = true;
+        }
+      }
+    }
+    if (changed) saveProjects(projects);
+  })();
+
   updateDisplay();
   countTodayPomodoros();
   updateTaskBanner();
