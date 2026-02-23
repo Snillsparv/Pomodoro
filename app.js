@@ -29,6 +29,7 @@
   var btnReset = document.getElementById('btn-reset');
   var pomodoroCount = document.getElementById('pomodoro-count');
   var currentTaskBanner = document.getElementById('current-task-banner');
+  var timerSchedule = document.getElementById('timer-schedule');
   var logModal = document.getElementById('log-modal');
   var activityInput = document.getElementById('activity-input');
   var activitySuggestions = document.getElementById('activity-suggestions');
@@ -163,6 +164,7 @@
     if (schedule.items.length === 0) {
       currentTaskBanner.classList.add('hidden');
       activeScheduleIndex = -1;
+      renderTimerSchedule();
       return;
     }
 
@@ -179,6 +181,7 @@
       currentTaskBanner.innerHTML = '<span class="banner-done">Alla uppgifter klara!</span>';
       currentTaskBanner.classList.remove('hidden');
       activeScheduleIndex = -1;
+      renderTimerSchedule();
       return;
     }
 
@@ -200,6 +203,52 @@
       '<span class="banner-task">' + escapeHtml(taskName) + '</span>' +
       '<span class="banner-progress">' + progress + '</span>';
     currentTaskBanner.classList.remove('hidden');
+    renderTimerSchedule();
+  }
+
+  function renderTimerSchedule() {
+    var schedule = getSchedule();
+    var tasks = getTasks();
+    var projects = getProjects();
+
+    if (schedule.items.length === 0) {
+      timerSchedule.innerHTML = '';
+      return;
+    }
+
+    // Find current (first incomplete) index
+    var currentIdx = -1;
+    for (var i = 0; i < schedule.items.length; i++) {
+      if (schedule.items[i].completed < schedule.items[i].pomodoros) {
+        currentIdx = i;
+        break;
+      }
+    }
+
+    timerSchedule.innerHTML = schedule.items.map(function (item, idx) {
+      var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
+      var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+      var color = getProjectColor(project);
+      var isDone = item.completed >= item.pomodoros;
+
+      var cls = 'ts-item';
+      if (isDone) cls += ' ts-done';
+      else if (idx === currentIdx) cls += ' ts-current';
+      else cls += ' ts-upcoming';
+
+      var indicator = isDone
+        ? '<span class="ts-check">&check;</span>'
+        : '<span class="ts-dot" style="background:' + color + '"></span>';
+
+      var taskName = task ? task.name : 'Borttagen';
+      var progress = item.completed + '/' + item.pomodoros;
+
+      return '<div class="' + cls + '">' +
+        indicator +
+        '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
+        '<span class="ts-pom">' + progress + '</span>' +
+        '</div>';
+    }).join('');
   }
 
   function countTodayPomodoros() {

@@ -198,6 +198,87 @@ nav {
   font-size: 15px;
 }
 
+/* Timer schedule list */
+#timer-schedule {
+  width: 100%;
+  max-width: 360px;
+  margin-top: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#timer-schedule:empty {
+  display: none;
+}
+
+.ts-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  transition: opacity 0.3s;
+}
+
+.ts-item.ts-done {
+  opacity: 0.35;
+}
+
+.ts-item.ts-current {
+  background: rgba(22, 33, 62, 0.7);
+  opacity: 1;
+}
+
+.ts-item.ts-upcoming {
+  opacity: 0.4;
+}
+
+.ts-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.ts-item.ts-done .ts-dot {
+  opacity: 0.5;
+}
+
+.ts-check {
+  font-size: 14px;
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+  color: #53a8b6;
+}
+
+.ts-name {
+  flex: 1;
+  font-size: 14px;
+  color: #ccc;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ts-item.ts-done .ts-name {
+  text-decoration: line-through;
+  color: #888;
+}
+
+.ts-item.ts-current .ts-name {
+  color: #fff;
+  font-weight: 500;
+}
+
+.ts-pom {
+  font-size: 13px;
+  color: #8888aa;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
 /* ========================================
    Modals (shared)
    ======================================== */
