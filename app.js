@@ -330,6 +330,46 @@
     updatePomodoroCount();
   }
 
+  // --- Alarm sound via Web Audio API ---
+  var audioCtx = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioCtx;
+  }
+
+  function playAlarm(type) {
+    var ctx;
+    try { ctx = getAudioCtx(); } catch (e) { return; }
+
+    // Work done: rising two-tone chime, Break done: softer single ping
+    if (type === 'work') {
+      playTone(ctx, 660, 0.18, 0, 0.25);
+      playTone(ctx, 880, 0.18, 0.2, 0.25);
+      playTone(ctx, 1100, 0.15, 0.4, 0.3);
+    } else {
+      playTone(ctx, 520, 0.14, 0, 0.2);
+      playTone(ctx, 680, 0.14, 0.15, 0.2);
+    }
+  }
+
+  function playTone(ctx, freq, duration, delay, volume) {
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    var t = ctx.currentTime + delay;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(volume, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
+    osc.start(t);
+    osc.stop(t + duration + 0.01);
+  }
+
   function updatePomodoroCount() {
     if (todayPomodoros > 0) {
       pomodoroCount.textContent = todayPomodoros + ' pomodoro' + (todayPomodoros !== 1 ? 's' : '') + ' idag';
@@ -346,6 +386,7 @@
       isRunning = false;
 
       if (isBreak) {
+        playAlarm('break');
         isBreak = false;
         timeLeft = WORK_SECONDS;
         updateDisplay();
@@ -355,6 +396,7 @@
         sessionLabel.textContent = '';
         updateTaskBanner();
       } else {
+        playAlarm('work');
         timeLeft = 0;
         updateDisplay();
         btnPause.disabled = true;
@@ -413,6 +455,11 @@
 
   function startTimer() {
     if (isRunning) return;
+    // Unlock audio context on user gesture (required by mobile browsers)
+    try {
+      var ctx = getAudioCtx();
+      if (ctx.state === 'suspended') ctx.resume();
+    } catch (e) { /* ignore */ }
     isRunning = true;
     btnStart.disabled = true;
     btnPause.disabled = false;
