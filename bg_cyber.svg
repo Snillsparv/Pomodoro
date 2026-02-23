@@ -1,0 +1,173 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+  <defs>
+    <!-- Glowing node -->
+    <radialGradient id="glow-cyan" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#53a8b6" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#53a8b6" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#53a8b6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-pink" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#e94560" stop-opacity="0.8"/>
+      <stop offset="60%" stop-color="#e94560" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#e94560" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow-purple" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#9b59b6" stop-opacity="0.7"/>
+      <stop offset="60%" stop-color="#9b59b6" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#9b59b6" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Subtle vignette -->
+    <radialGradient id="vignette" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#1a1a2e" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#0a0a18" stop-opacity="0.6"/>
+    </radialGradient>
+    <!-- Hex grid pattern -->
+    <pattern id="hex" width="60" height="52" patternUnits="userSpaceOnUse" patternTransform="rotate(15)">
+      <polygon points="30,2 55,15 55,37 30,50 5,37 5,15" fill="none" stroke="#53a8b6" stroke-width="0.3" opacity="0.12"/>
+    </pattern>
+    <!-- Fine dot grid -->
+    <pattern id="dots" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="20" cy="20" r="0.6" fill="#53a8b6" opacity="0.2"/>
+    </pattern>
+  </defs>
+
+  <!-- Base background -->
+  <rect width="1400" height="900" fill="#1a1a2e"/>
+
+  <!-- Hex grid layer -->
+  <rect width="1400" height="900" fill="url(#hex)"/>
+
+  <!-- Dot grid layer -->
+  <rect width="1400" height="900" fill="url(#dots)"/>
+
+  <!-- Circuit traces - main horizontal -->
+  <g stroke="#0f3460" stroke-width="1.2" fill="none" opacity="0.6">
+    <polyline points="0,200 180,200 220,240 480,240 500,220 700,220"/>
+    <polyline points="700,220 850,220 880,250 1100,250 1140,210 1400,210"/>
+    <polyline points="0,650 200,650 240,620 500,620 540,660 780,660"/>
+    <polyline points="780,660 920,660 960,630 1200,630 1260,670 1400,670"/>
+    <polyline points="0,420 140,420 170,450 350,450"/>
+    <polyline points="1050,450 1200,450 1230,420 1400,420"/>
+  </g>
+
+  <!-- Circuit traces - verticals -->
+  <g stroke="#0f3460" stroke-width="1.2" fill="none" opacity="0.6">
+    <polyline points="300,0 300,120 330,150 330,240"/>
+    <polyline points="1100,0 1100,100 1070,130 1070,250"/>
+    <polyline points="200,650 200,780 230,810 230,900"/>
+    <polyline points="1000,660 1000,780 970,810 970,900"/>
+    <polyline points="700,0 700,100 700,220"/>
+    <polyline points="700,220 700,400 680,430 680,500"/>
+    <polyline points="680,500 680,620 700,660"/>
+  </g>
+
+  <!-- Circuit traces - diagonal accents -->
+  <g stroke="#16213e" stroke-width="0.8" fill="none" opacity="0.5">
+    <line x1="50" y1="0" x2="300" y2="200"/>
+    <line x1="1350" y1="0" x2="1100" y2="210"/>
+    <line x1="50" y1="900" x2="250" y2="650"/>
+    <line x1="1350" y1="900" x2="1150" y2="670"/>
+  </g>
+
+  <!-- Secondary thinner circuit traces -->
+  <g stroke="#53a8b6" stroke-width="0.5" fill="none" opacity="0.15">
+    <polyline points="0,300 100,300 130,270 380,270 400,290 600,290"/>
+    <polyline points="800,290 950,290 980,310 1200,310 1240,280 1400,280"/>
+    <polyline points="0,550 160,550 190,580 400,580 430,550 600,550"/>
+    <polyline points="800,550 1000,550 1030,580 1250,580 1280,550 1400,550"/>
+    <polyline points="500,0 500,80 520,100 520,240"/>
+    <polyline points="900,0 900,80 880,100 880,220"/>
+    <polyline points="450,660 450,800 470,820 470,900"/>
+    <polyline points="950,660 950,800 930,820 930,900"/>
+  </g>
+
+  <!-- Glow nodes at intersections -->
+  <!-- Large cyan nodes -->
+  <circle cx="700" cy="220" r="20" fill="url(#glow-cyan)"/>
+  <circle cx="700" cy="220" r="3" fill="#53a8b6" opacity="0.9"/>
+
+  <circle cx="700" cy="660" r="18" fill="url(#glow-cyan)"/>
+  <circle cx="700" cy="660" r="2.5" fill="#53a8b6" opacity="0.8"/>
+
+  <circle cx="330" cy="240" r="14" fill="url(#glow-cyan)"/>
+  <circle cx="330" cy="240" r="2" fill="#53a8b6" opacity="0.7"/>
+
+  <circle cx="1070" cy="250" r="14" fill="url(#glow-cyan)"/>
+  <circle cx="1070" cy="250" r="2" fill="#53a8b6" opacity="0.7"/>
+
+  <!-- Pink accent nodes -->
+  <circle cx="500" cy="220" r="12" fill="url(#glow-pink)"/>
+  <circle cx="500" cy="220" r="2" fill="#e94560" opacity="0.8"/>
+
+  <circle cx="920" cy="660" r="12" fill="url(#glow-pink)"/>
+  <circle cx="920" cy="660" r="2" fill="#e94560" opacity="0.8"/>
+
+  <circle cx="200" cy="650" r="12" fill="url(#glow-pink)"/>
+  <circle cx="200" cy="650" r="2" fill="#e94560" opacity="0.7"/>
+
+  <circle cx="1200" cy="250" r="10" fill="url(#glow-pink)"/>
+  <circle cx="1200" cy="250" r="1.5" fill="#e94560" opacity="0.7"/>
+
+  <!-- Purple accent nodes -->
+  <circle cx="680" cy="500" r="16" fill="url(#glow-purple)"/>
+  <circle cx="680" cy="500" r="2.5" fill="#9b59b6" opacity="0.8"/>
+
+  <circle cx="350" cy="450" r="12" fill="url(#glow-purple)"/>
+  <circle cx="350" cy="450" r="2" fill="#9b59b6" opacity="0.7"/>
+
+  <circle cx="1050" cy="450" r="12" fill="url(#glow-purple)"/>
+  <circle cx="1050" cy="450" r="2" fill="#9b59b6" opacity="0.7"/>
+
+  <!-- Small secondary nodes -->
+  <g opacity="0.5">
+    <circle cx="180" cy="200" r="6" fill="url(#glow-cyan)"/>
+    <circle cx="180" cy="200" r="1" fill="#53a8b6"/>
+    <circle cx="480" cy="240" r="6" fill="url(#glow-cyan)"/>
+    <circle cx="480" cy="240" r="1" fill="#53a8b6"/>
+    <circle cx="850" cy="220" r="6" fill="url(#glow-cyan)"/>
+    <circle cx="850" cy="220" r="1" fill="#53a8b6"/>
+    <circle cx="540" cy="660" r="6" fill="url(#glow-cyan)"/>
+    <circle cx="540" cy="660" r="1" fill="#53a8b6"/>
+    <circle cx="1200" cy="630" r="6" fill="url(#glow-pink)"/>
+    <circle cx="1200" cy="630" r="1" fill="#e94560"/>
+    <circle cx="140" cy="420" r="6" fill="url(#glow-purple)"/>
+    <circle cx="140" cy="420" r="1" fill="#9b59b6"/>
+    <circle cx="1230" cy="420" r="6" fill="url(#glow-purple)"/>
+    <circle cx="1230" cy="420" r="1" fill="#9b59b6"/>
+  </g>
+
+  <!-- Decorative geometric shapes -->
+  <!-- Top-left corner piece -->
+  <g transform="translate(80, 80)" opacity="0.15">
+    <rect x="-20" y="-20" width="40" height="40" fill="none" stroke="#53a8b6" stroke-width="1" transform="rotate(45)"/>
+    <rect x="-12" y="-12" width="24" height="24" fill="none" stroke="#53a8b6" stroke-width="0.5" transform="rotate(45)"/>
+  </g>
+
+  <!-- Top-right corner piece -->
+  <g transform="translate(1320, 100)" opacity="0.12">
+    <polygon points="0,-25 22,12 -22,12" fill="none" stroke="#e94560" stroke-width="1"/>
+    <polygon points="0,-15 13,7 -13,7" fill="none" stroke="#e94560" stroke-width="0.5"/>
+  </g>
+
+  <!-- Bottom-left corner piece -->
+  <g transform="translate(100, 800)" opacity="0.12">
+    <polygon points="0,-25 22,12 -22,12" fill="none" stroke="#9b59b6" stroke-width="1"/>
+    <polygon points="0,-15 13,7 -13,7" fill="none" stroke="#9b59b6" stroke-width="0.5"/>
+  </g>
+
+  <!-- Bottom-right corner piece -->
+  <g transform="translate(1300, 820)" opacity="0.15">
+    <rect x="-18" y="-18" width="36" height="36" fill="none" stroke="#53a8b6" stroke-width="1" transform="rotate(45)"/>
+    <rect x="-10" y="-10" width="20" height="20" fill="none" stroke="#53a8b6" stroke-width="0.5" transform="rotate(45)"/>
+  </g>
+
+  <!-- Center decorative ring -->
+  <g transform="translate(700, 450)" opacity="0.06">
+    <circle cx="0" cy="0" r="200" fill="none" stroke="#53a8b6" stroke-width="0.8"/>
+    <circle cx="0" cy="0" r="180" fill="none" stroke="#53a8b6" stroke-width="0.4" stroke-dasharray="8 12"/>
+    <circle cx="0" cy="0" r="220" fill="none" stroke="#e94560" stroke-width="0.4" stroke-dasharray="4 16"/>
+  </g>
+
+  <!-- Vignette overlay -->
+  <rect width="1400" height="900" fill="url(#vignette)"/>
+</svg>
