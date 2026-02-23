@@ -12,6 +12,16 @@
     '#34d399', '#f472b6', '#60a5fa', '#fb923c'
   ];
 
+  // --- Timer Worker (immune to background-tab throttling) ---
+  var timerWorker = null;
+  try {
+    var workerCode = 'var id=null;self.onmessage=function(e){if(e.data==="start"){if(id)clearInterval(id);id=setInterval(function(){self.postMessage("t")},250)}else if(e.data==="stop"){if(id){clearInterval(id);id=null}}};';
+    var blob = new Blob([workerCode], { type: 'application/javascript' });
+    timerWorker = new Worker(URL.createObjectURL(blob));
+  } catch (e) {
+    timerWorker = null; // fallback to setInterval if Workers unavailable
+  }
+
   // --- State ---
   var timeLeft = WORK_SECONDS;
   var endTime = null; // wall-clock timestamp (ms) when timer expires
@@ -520,6 +530,7 @@
   function tick() {
     timeLeft = Math.round((endTime - Date.now()) / 1000);
     if (timeLeft < 0) {
+      if (timerWorker) timerWorker.postMessage('stop');
       clearInterval(intervalId);
       intervalId = null;
       endTime = null;
@@ -611,7 +622,12 @@
     isRunning = true;
     btnStart.disabled = true;
     btnPause.disabled = false;
-    intervalId = setInterval(tick, 250);
+    // Use Web Worker for ticks (immune to background-tab throttling)
+    if (timerWorker) {
+      timerWorker.postMessage('start');
+    } else {
+      intervalId = setInterval(tick, 250);
+    }
     updateDisplay();
   }
 
@@ -621,6 +637,9 @@
     timeLeft = Math.max(0, Math.round((endTime - Date.now()) / 1000));
     endTime = null;
     isRunning = false;
+    if (timerWorker) {
+      timerWorker.postMessage('stop');
+    }
     clearInterval(intervalId);
     intervalId = null;
     btnStart.disabled = false;
@@ -641,6 +660,18 @@
   btnStart.addEventListener('click', startTimer);
   btnPause.addEventListener('click', pauseTimer);
   btnReset.addEventListener('click', resetTimer);
+
+  // Wire up Web Worker ticks
+  if (timerWorker) {
+    timerWorker.onmessage = function () {
+      if (isRunning) tick();
+    };
+  }
+
+  // Catch up immediately when user returns to the tab
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden && isRunning) tick();
+  });
 
   // ========================================
   // Activity logging (fallback for no schedule)
