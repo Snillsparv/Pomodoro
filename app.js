@@ -192,7 +192,7 @@
     var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
     var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
 
-    var projectName = project ? project.name : '';
+    var projectName = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
     var taskName = task ? task.name : 'Okänd uppgift';
     var progress = item.completed + '/' + item.pomodoros;
     var color = getProjectColor(project);
@@ -205,6 +205,8 @@
     currentTaskBanner.classList.remove('hidden');
     renderTimerSchedule();
   }
+
+  var TS_BASE_HEIGHT = 38;
 
   function renderTimerSchedule() {
     var schedule = getSchedule();
@@ -242,13 +244,44 @@
 
       var taskName = task ? task.name : 'Borttagen';
       var progress = item.completed + '/' + item.pomodoros;
+      var height = TS_BASE_HEIGHT * item.pomodoros;
 
-      return '<div class="' + cls + '">' +
+      return '<div class="' + cls + '" data-idx="' + idx + '" style="min-height:' + height + 'px">' +
         indicator +
         '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
         '<span class="ts-pom">' + progress + '</span>' +
         '</div>';
     }).join('');
+
+    // Timer schedule drag reorder
+    timerSchedule.querySelectorAll('.ts-item').forEach(function (el) {
+      initTimerScheduleDrag(el);
+    });
+  }
+
+  function initTimerScheduleDrag(el) {
+    var idx = parseInt(el.dataset.idx);
+
+    function onStart(clientX, clientY) {
+      drag.active = true;
+      drag.started = false;
+      drag.type = 'timer-reorder';
+      drag.sourceIdx = idx;
+      drag.sourceEl = el;
+      drag.startX = clientX;
+      drag.startY = clientY;
+    }
+
+    el.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) return;
+      var t = e.touches[0];
+      onStart(t.clientX, t.clientY);
+    }, { passive: true });
+
+    el.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      onStart(e.clientX, e.clientY);
+    });
   }
 
   function countTodayPomodoros() {
@@ -316,7 +349,8 @@
     var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
     var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
 
-    var activityName = (project ? project.name + ' — ' : '') + (task ? task.name : 'Okänd');
+    var projLabel = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
+    var activityName = (projLabel ? projLabel + ' — ' : '') + (task ? task.name : 'Okänd');
 
     // Save session
     var sessions = getSessions();
@@ -619,7 +653,7 @@
         '<span class="schedule-drag-handle">&#9776;</span>' +
         '<div class="schedule-item-body">' +
         '<div class="schedule-item-info">' +
-        '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : '') + '</span>' +
+        '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + '</span>' +
         '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
         '</div>' +
         '</div>' +
@@ -649,9 +683,9 @@
       });
     });
 
-    // Drag handles for reorder
-    scheduleList.querySelectorAll('.schedule-drag-handle').forEach(function (handle) {
-      initScheduleDrag(handle);
+    // Whole schedule items are draggable
+    scheduleList.querySelectorAll('.schedule-item').forEach(function (item) {
+      initScheduleDrag(item);
     });
   }
 
@@ -812,7 +846,7 @@
     }
     scheduleList.classList.remove('drop-active');
     // Remove any placeholders
-    var phs = scheduleList.querySelectorAll('.schedule-drop-placeholder');
+    var phs = document.querySelectorAll('.schedule-drop-placeholder, .ts-drop-placeholder');
     phs.forEach(function (p) { p.remove(); });
     drag.active = false;
     drag.started = false;
@@ -848,11 +882,11 @@
   }
 
   // --- Schedule drag (reorder) ---
-  function initScheduleDrag(handle) {
-    var item = handle.closest('.schedule-item');
+  function initScheduleDrag(item) {
     var idx = parseInt(item.dataset.idx);
 
-    function onStart(clientX, clientY) {
+    function onStart(clientX, clientY, e) {
+      if (e.target.closest('.btn-tiny')) return;
       drag.active = true;
       drag.started = false;
       drag.type = 'schedule-reorder';
@@ -862,17 +896,15 @@
       drag.startY = clientY;
     }
 
-    handle.addEventListener('touchstart', function (e) {
+    item.addEventListener('touchstart', function (e) {
       if (e.touches.length !== 1) return;
       var t = e.touches[0];
-      onStart(t.clientX, t.clientY);
-      e.preventDefault();
-    }, { passive: false });
+      onStart(t.clientX, t.clientY, e);
+    }, { passive: true });
 
-    handle.addEventListener('mousedown', function (e) {
+    item.addEventListener('mousedown', function (e) {
       if (e.button !== 0) return;
-      onStart(e.clientX, e.clientY);
-      e.preventDefault();
+      onStart(e.clientX, e.clientY, e);
     });
   }
 
@@ -897,9 +929,12 @@
         drag.ghost = createGhost(task ? task.name : '', color);
         scheduleList.classList.add('drop-active');
         scheduleEmpty.classList.add('hidden');
-      } else {
+      } else if (drag.type === 'schedule-reorder') {
         var taskText = drag.sourceEl.querySelector('.schedule-task');
         drag.ghost = createGhost(taskText ? taskText.textContent : '', null);
+      } else if (drag.type === 'timer-reorder') {
+        var tsName = drag.sourceEl.querySelector('.ts-name');
+        drag.ghost = createGhost(tsName ? tsName.textContent : '', null);
       }
     }
 
@@ -910,16 +945,17 @@
     drag.ghost.style.top = (clientY - 20) + 'px';
 
     if (drag.type === 'schedule-reorder') {
-      updateReorderPlaceholder(clientY);
+      updateReorderPlaceholder(clientY, scheduleList, '.schedule-item', 'schedule-drop-placeholder');
+    } else if (drag.type === 'timer-reorder') {
+      updateReorderPlaceholder(clientY, timerSchedule, '.ts-item', 'ts-drop-placeholder');
     }
   }
 
-  function updateReorderPlaceholder(clientY) {
-    // Remove old placeholders
-    var old = scheduleList.querySelectorAll('.schedule-drop-placeholder');
+  function updateReorderPlaceholder(clientY, container, itemSelector, phClass) {
+    var old = container.querySelectorAll('.' + phClass);
     old.forEach(function (p) { p.remove(); });
 
-    var items = scheduleList.querySelectorAll('.schedule-item');
+    var items = container.querySelectorAll(itemSelector);
     var insertBefore = null;
 
     for (var i = 0; i < items.length; i++) {
@@ -932,11 +968,11 @@
     }
 
     var ph = document.createElement('div');
-    ph.className = 'schedule-drop-placeholder';
+    ph.className = phClass;
     if (insertBefore) {
-      scheduleList.insertBefore(ph, insertBefore);
+      container.insertBefore(ph, insertBefore);
     } else {
-      scheduleList.appendChild(ph);
+      container.appendChild(ph);
     }
   }
 
@@ -954,19 +990,19 @@
           renderSchedule();
           renderProjects();
         }
-      } else if (drag.type === 'schedule-reorder') {
-        // Determine new index from placeholder position
-        var items = scheduleList.querySelectorAll('.schedule-item');
-        var ph = scheduleList.querySelector('.schedule-drop-placeholder');
+      } else if (drag.type === 'schedule-reorder' || drag.type === 'timer-reorder') {
+        var container = drag.type === 'schedule-reorder' ? scheduleList : timerSchedule;
+        var itemCls = drag.type === 'schedule-reorder' ? 'schedule-item' : 'ts-item';
+        var phCls = drag.type === 'schedule-reorder' ? 'schedule-drop-placeholder' : 'ts-drop-placeholder';
+        var ph = container.querySelector('.' + phCls);
         var newIdx = 0;
 
         if (ph) {
-          // Count schedule-items before placeholder
-          var sibling = scheduleList.firstChild;
+          var sibling = container.firstChild;
           var count = 0;
           while (sibling) {
             if (sibling === ph) break;
-            if (sibling.classList && sibling.classList.contains('schedule-item')) count++;
+            if (sibling.classList && sibling.classList.contains(itemCls)) count++;
             sibling = sibling.nextSibling;
           }
           newIdx = count;
@@ -975,13 +1011,16 @@
         var schedule = getSchedule();
         var fromIdx = drag.sourceIdx;
         if (fromIdx !== newIdx && fromIdx !== newIdx - 1) {
-          // Adjust: if moving down, account for removal
           var removed = schedule.items.splice(fromIdx, 1)[0];
           var targetIdx = fromIdx < newIdx ? newIdx - 1 : newIdx;
           schedule.items.splice(targetIdx, 0, removed);
           saveSchedule(schedule);
         }
-        renderSchedule();
+        if (drag.type === 'schedule-reorder') {
+          renderSchedule();
+        } else {
+          updateTaskBanner();
+        }
       }
     } else if (drag.type === 'task-to-schedule' && drag.taskId) {
       // Wasn't a drag (no movement) → open task detail
@@ -1019,8 +1058,53 @@
     onDragEnd(e.clientX, e.clientY);
   });
 
+  // ========================================
+  // Quick-add task from timer
+  // ========================================
+  var quickAddModal = document.getElementById('quick-add-modal');
+  var quickAddName = document.getElementById('quick-add-name');
+  var quickAddProject = document.getElementById('quick-add-project');
+  var btnQuickAddSave = document.getElementById('btn-quick-add-save');
+  var btnTimerAdd = document.getElementById('btn-timer-add');
+
+  btnTimerAdd.addEventListener('click', function () {
+    // Populate project dropdown
+    var projects = getProjects();
+    quickAddProject.innerHTML = '<option value="">&Ouml;vrigt</option>' +
+      projects.map(function (p) {
+        return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
+      }).join('');
+    quickAddName.value = '';
+    quickAddModal.classList.remove('hidden');
+    quickAddName.focus();
+  });
+
+  btnQuickAddSave.addEventListener('click', saveQuickAdd);
+  quickAddName.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') saveQuickAdd();
+  });
+
+  function saveQuickAdd() {
+    var name = quickAddName.value.trim() || 'Ny uppgift';
+    var projectId = quickAddProject.value || null;
+
+    // Create the task
+    var tasks = getTasks();
+    var taskId = generateId();
+    tasks.push({ id: taskId, projectId: projectId, name: name });
+    saveTasks(tasks);
+
+    // Add to schedule
+    var schedule = getSchedule();
+    schedule.items.push({ taskId: taskId, pomodoros: 1, completed: 0 });
+    saveSchedule(schedule);
+
+    quickAddModal.classList.add('hidden');
+    updateTaskBanner();
+  }
+
   // Close modals on backdrop click
-  [logModal, scheduleModal, projectModal, taskModal, taskDetailModal].forEach(function (modal) {
+  [logModal, scheduleModal, projectModal, taskModal, taskDetailModal, quickAddModal].forEach(function (modal) {
     modal.addEventListener('click', function (e) {
       if (e.target === modal) {
         modal.classList.add('hidden');
