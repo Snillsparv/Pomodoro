@@ -368,11 +368,15 @@
       var taskName = task ? task.name : 'Borttagen';
       var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
 
-      // Past undone items get check + remove buttons
+      // Action buttons for undone items
       var pastBtns = '';
-      if (isPast && !item.done) {
-        pastBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + idx + '" title="Markera klar">&check;</button>' +
-          '<button class="ts-mark-remove btn-tiny" data-idx="' + idx + '" title="Ta bort">&times;</button>';
+      if (!item.done) {
+        if (isPast) {
+          pastBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + idx + '" title="Markera klar">&check;</button>' +
+            '<button class="ts-mark-remove btn-tiny" data-idx="' + idx + '" title="Ta bort">&times;</button>';
+        } else {
+          pastBtns = '<button class="ts-mark-remove btn-tiny" data-idx="' + idx + '" title="Ta bort">&times;</button>';
+        }
       }
 
       html += '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + (item.taskId || '') + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
@@ -419,7 +423,7 @@
       });
     });
 
-    // Past item: remove → empty slot
+    // Remove item: past → empty slot, upcoming/current → splice
     timerSchedule.querySelectorAll('.ts-mark-remove').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -427,7 +431,12 @@
         var schedule = getSchedule();
         var i = parseInt(btn.dataset.idx);
         if (i < schedule.items.length) {
-          schedule.items[i] = { taskId: null, done: false };
+          var el = btn.closest('.ts-item');
+          if (el && el.classList.contains('ts-past')) {
+            schedule.items[i] = { taskId: null, done: false };
+          } else {
+            schedule.items.splice(i, 1);
+          }
           saveSchedule(schedule);
           updateTaskBanner();
         }
