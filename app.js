@@ -66,6 +66,10 @@
   var schedulePrev = document.getElementById('schedule-prev');
   var scheduleNext = document.getElementById('schedule-next');
   var scheduleDateLabel = document.getElementById('schedule-date-label');
+  var carryoverBanner = document.getElementById('carryover-banner');
+  var carryoverMessage = document.getElementById('carryover-message');
+  var btnCarryover = document.getElementById('btn-carryover');
+  var btnCarryoverDismiss = document.getElementById('btn-carryover-dismiss');
 
   // Modals
   var scheduleModal = document.getElementById('schedule-modal');
@@ -760,10 +764,92 @@
   });
 
   // ========================================
+  // Task carryover from previous day
+  // ========================================
+  function getCarryoverItems() {
+    var history = getScheduleHistory();
+    var dates = Object.keys(history).filter(function (d) {
+      return d < todayStr() && history[d] && history[d].length > 0;
+    });
+    if (dates.length === 0) return null;
+    dates.sort();
+    var lastDate = dates[dates.length - 1];
+    var items = migrateScheduleItems(history[lastDate]);
+    var tasks = getTasks();
+    var taskIds = tasks.map(function (t) { return t.id; });
+    // Filter to only unfinished items whose tasks still exist
+    var unfinished = items.filter(function (item) {
+      return !item.done && taskIds.indexOf(item.taskId) !== -1;
+    });
+    if (unfinished.length === 0) return null;
+    return { date: lastDate, items: unfinished };
+  }
+
+  function isCarryoverDismissed() {
+    return localStorage.getItem('pomodoro_carryover_dismissed') === todayStr();
+  }
+
+  function dismissCarryover() {
+    localStorage.setItem('pomodoro_carryover_dismissed', todayStr());
+    carryoverBanner.classList.add('hidden');
+  }
+
+  function carryoverTasks() {
+    var carryover = getCarryoverItems();
+    if (!carryover) return;
+    var schedule = getSchedule();
+    var existingTaskIds = schedule.items.map(function (i) { return i.taskId; });
+    // Group carryover items by task to avoid duplicate tasks
+    var added = {};
+    for (var i = 0; i < carryover.items.length; i++) {
+      var item = carryover.items[i];
+      if (existingTaskIds.indexOf(item.taskId) === -1 || added[item.taskId]) {
+        schedule.items.push({ taskId: item.taskId, done: false });
+        added[item.taskId] = true;
+        // Track so we don't add same task from existingTaskIds check on next iteration
+        if (existingTaskIds.indexOf(item.taskId) === -1) {
+          existingTaskIds.push(item.taskId);
+        }
+      }
+    }
+    saveSchedule(schedule);
+    dismissCarryover();
+    renderPlanView();
+    updateTaskBanner();
+  }
+
+  function renderCarryoverBanner() {
+    var viewDate = scheduleViewDate || todayStr();
+    if (viewDate !== todayStr() || isCarryoverDismissed()) {
+      carryoverBanner.classList.add('hidden');
+      return;
+    }
+    var carryover = getCarryoverItems();
+    if (!carryover) {
+      carryoverBanner.classList.add('hidden');
+      return;
+    }
+    // Build message with task count and source date
+    var taskIds = {};
+    for (var i = 0; i < carryover.items.length; i++) {
+      taskIds[carryover.items[i].taskId] = true;
+    }
+    var taskCount = Object.keys(taskIds).length;
+    var sourceLabel = formatDateLabel(carryover.date).toLowerCase();
+    carryoverMessage.textContent = taskCount + ' oavklarad' + (taskCount !== 1 ? 'e' : '') +
+      ' uppgift' + (taskCount !== 1 ? 'er' : '') + ' fr\u00e5n ' + sourceLabel;
+    carryoverBanner.classList.remove('hidden');
+  }
+
+  btnCarryover.addEventListener('click', carryoverTasks);
+  btnCarryoverDismiss.addEventListener('click', dismissCarryover);
+
+  // ========================================
   // Projects & Tasks (Planera)
   // ========================================
   function renderPlanView() {
     updateScheduleDateNav();
+    renderCarryoverBanner();
     renderSchedule();
     renderProjects();
   }
