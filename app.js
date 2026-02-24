@@ -1278,13 +1278,17 @@
   var taskDetailProject = document.getElementById('task-detail-project');
   var taskDetailDesc = document.getElementById('task-detail-desc');
   var btnSaveTaskDetail = document.getElementById('btn-save-task-detail');
+  var taskSwapSection = document.getElementById('task-swap-section');
+  var taskSwapList = document.getElementById('task-swap-list');
   var editingTaskId = null;
+  var editingTimerIdx = null; // non-null when editing from timer view
 
-  function openTaskDetail(taskId) {
+  function openTaskDetail(taskId, timerIdx) {
     var tasks = getTasks();
     var task = tasks.filter(function (t) { return t.id === taskId; })[0];
     if (!task) return;
     editingTaskId = taskId;
+    editingTimerIdx = (timerIdx != null) ? timerIdx : null;
     taskDetailName.value = task.name;
     taskDetailDesc.value = task.description || '';
     // Populate project dropdown
@@ -1294,8 +1298,65 @@
         return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
       }).join('');
     taskDetailProject.value = task.projectId || '';
+
+    // Show swap section only when editing from timer view
+    if (editingTimerIdx != null) {
+      taskSwapSection.classList.remove('hidden');
+      renderTaskSwapList(taskId);
+    } else {
+      taskSwapSection.classList.add('hidden');
+    }
+
     taskDetailModal.classList.remove('hidden');
     taskDetailName.focus();
+  }
+
+  function renderTaskSwapList(currentTaskId) {
+    var tasks = getTasks();
+    var projects = getProjects();
+
+    // Group tasks by project
+    var groups = [];
+    projects.forEach(function (p) {
+      var projTasks = tasks.filter(function (t) { return t.projectId === p.id && t.id !== currentTaskId; });
+      if (projTasks.length) groups.push({ name: p.name, color: getProjectColor(p), tasks: projTasks });
+    });
+    // Ungrouped tasks (Övrigt)
+    var loose = tasks.filter(function (t) { return !t.projectId && t.id !== currentTaskId; });
+    if (loose.length) groups.push({ name: 'Övrigt', color: '#8888aa', tasks: loose });
+
+    if (groups.length === 0) {
+      taskSwapList.innerHTML = '<div class="no-tasks">Inga andra uppgifter</div>';
+      return;
+    }
+
+    taskSwapList.innerHTML = groups.map(function (g) {
+      return '<div class="swap-group">' +
+        '<div class="swap-group-name" style="color:' + g.color + '">' + escapeHtml(g.name) + '</div>' +
+        g.tasks.map(function (t) {
+          return '<button class="swap-task-btn" data-task-id="' + t.id + '">' + escapeHtml(t.name) + '</button>';
+        }).join('') +
+        '</div>';
+    }).join('');
+
+    taskSwapList.querySelectorAll('.swap-task-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        swapTimerTask(btn.dataset.taskId);
+      });
+    });
+  }
+
+  function swapTimerTask(newTaskId) {
+    if (editingTimerIdx == null) return;
+    var schedule = getSchedule();
+    if (editingTimerIdx < schedule.items.length) {
+      schedule.items[editingTimerIdx].taskId = newTaskId;
+      saveSchedule(schedule);
+    }
+    taskDetailModal.classList.add('hidden');
+    editingTaskId = null;
+    editingTimerIdx = null;
+    updateTaskBanner();
   }
 
   btnSaveTaskDetail.addEventListener('click', saveTaskDetail);
@@ -1323,6 +1384,7 @@
     saveTasks(tasks);
     taskDetailModal.classList.add('hidden');
     editingTaskId = null;
+    editingTimerIdx = null;
     renderPlanView();
     updateTaskBanner();
   }
@@ -1548,7 +1610,11 @@
       }
     } else if (drag.taskId) {
       // Wasn't a drag (no movement) → open task detail
-      openTaskDetail(drag.taskId);
+      if (drag.type === 'timer-reorder') {
+        openTaskDetail(drag.taskId, drag.sourceIdx);
+      } else {
+        openTaskDetail(drag.taskId);
+      }
     }
 
     cleanupDrag();

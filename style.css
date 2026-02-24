@@ -909,6 +909,57 @@ nav {
   background: #c73a52;
 }
 
+/* Task swap (pick existing task from timer) */
+#task-swap-section.hidden {
+  display: none;
+}
+
+#task-swap-heading {
+  font-size: 16px;
+  color: #ccc;
+  margin-bottom: 12px;
+}
+
+#task-swap-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.swap-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.swap-group-name {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.swap-task-btn {
+  padding: 12px 14px;
+  border: 2px solid #0f3460;
+  border-radius: 10px;
+  background: transparent;
+  color: #eee;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.swap-task-btn:active {
+  background: #0f3460;
+  border-color: #53a8b6;
+  transform: scale(0.98);
+}
+
 /* Projects */
 #projects-section {
   flex: 1;
