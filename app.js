@@ -144,11 +144,16 @@
   }
 
   // Group flat items by taskId for plan view display
+  // Empty slots (taskId === null) are kept as individual entries
   function groupScheduleItems(items) {
     var groups = [];
     var seen = {};
     for (var i = 0; i < items.length; i++) {
       var tid = items[i].taskId;
+      if (!tid) {
+        groups.push({ taskId: null, total: 1, completed: 0, flatIdx: i });
+        continue;
+      }
       if (!seen[tid]) {
         seen[tid] = { taskId: tid, total: 0, completed: 0 };
         groups.push(seen[tid]);
@@ -249,10 +254,10 @@
       return;
     }
 
-    // Find first not-done item
+    // Find first not-done item (skip empty slots)
     var idx = -1;
     for (var i = 0; i < schedule.items.length; i++) {
-      if (!schedule.items[i].done) {
+      if (!schedule.items[i].done && schedule.items[i].taskId) {
         idx = i;
         break;
       }
@@ -330,6 +335,21 @@
         nowInserted = true;
       }
 
+      var timeLabel = formatMinutesAsTime(slotStart);
+
+      // Empty slot
+      if (!item.taskId) {
+        html += '<div class="ts-item ts-empty" data-idx="' + idx + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
+          '<div class="ts-item-inner">' +
+          '<span class="ts-time">' + timeLabel + '</span>' +
+          '<span class="ts-dot-empty"></span>' +
+          '<span class="ts-name ts-name-empty">Ledig</span>' +
+          '<button class="ts-remove-empty btn-tiny" data-idx="' + idx + '">&times;</button>' +
+          '</div>' +
+          '</div>';
+        return;
+      }
+
       var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
       var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
       var color = getProjectColor(project);
@@ -345,9 +365,8 @@
 
       var taskName = task ? task.name : 'Borttagen';
       var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
-      var timeLabel = formatMinutesAsTime(slotStart);
 
-      html += '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + item.taskId + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
+      html += '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + (item.taskId || '') + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
         '<div class="ts-item-bg bg-done">Klar</div>' +
         '<div class="ts-item-bg bg-remove">Ta bort</div>' +
         '<div class="ts-item-inner">' +
@@ -374,8 +393,22 @@
       });
     });
 
+    // Remove empty slot buttons
+    timerSchedule.querySelectorAll('.ts-remove-empty').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var schedule = getSchedule();
+        var i = parseInt(btn.dataset.idx);
+        if (i < schedule.items.length && !schedule.items[i].taskId) {
+          schedule.items.splice(i, 1);
+          saveSchedule(schedule);
+          updateTaskBanner();
+        }
+      });
+    });
+
     // Timer schedule drag reorder + swipe gestures
-    timerSchedule.querySelectorAll('.ts-item').forEach(function (el) {
+    timerSchedule.querySelectorAll('.ts-item:not(.ts-empty)').forEach(function (el) {
       initTimerScheduleDrag(el);
       if (!el.classList.contains('ts-done')) {
         initTimerSwipe(el, parseInt(el.dataset.idx));
@@ -1141,11 +1174,6 @@
       // Editable today view — grouped by task
       var html = '';
       groups.forEach(function (group, gIdx) {
-        var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
-        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-        var isDone = group.completed >= group.total;
-        var color = getProjectColor(project);
-
         var groupEndMin = cumMin + group.total * WORK_MINUTES + (group.total - 1) * BREAK_MINUTES;
 
         // Insert "now" line before this group if appropriate
@@ -1157,6 +1185,23 @@
         }
 
         var timeLabel = formatMinutesAsTime(cumMin);
+
+        // Empty slot
+        if (!group.taskId) {
+          html += '<div class="schedule-item schedule-empty-slot" data-gidx="' + gIdx + '" data-flat-idx="' + group.flatIdx + '" style="animation:item-in 0.25s ' + (gIdx * 0.05) + 's both">' +
+            '<span class="schedule-time-label">' + timeLabel + '</span>' +
+            '<span class="schedule-empty-label">Ledig</span>' +
+            '<button class="btn-remove-empty-slot btn-tiny" data-flat-idx="' + group.flatIdx + '">&times;</button>' +
+            '</div>';
+          cumMin = groupEndMin + BREAK_MINUTES;
+          return;
+        }
+
+        var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
+        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+        var isDone = group.completed >= group.total;
+        var color = getProjectColor(project);
+
         var recurring = task && task.recurring;
         var recurBadge = recurring ? '<span class="recurring-badge">' + (recurring === 'daily' ? 'daglig' : 'veckovis') + '</span>' : '';
         var playBtn = isDone ? '' : '<button class="btn-play-task" data-task-id="' + group.taskId + '" title="Starta">&#9654;</button>';
@@ -1211,9 +1256,21 @@
           playTask(btn.dataset.taskId);
         });
       });
+      scheduleList.querySelectorAll('.btn-remove-empty-slot').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var schedule = getSchedule();
+          var fi = parseInt(btn.dataset.flatIdx);
+          if (fi < schedule.items.length && !schedule.items[fi].taskId) {
+            schedule.items.splice(fi, 1);
+            saveSchedule(schedule);
+            renderPlanView();
+            updateTaskBanner();
+          }
+        });
+      });
 
-      // Whole schedule items are draggable
-      scheduleList.querySelectorAll('.schedule-item').forEach(function (item) {
+      // Whole schedule items are draggable (skip empty slots)
+      scheduleList.querySelectorAll('.schedule-item:not(.schedule-empty-slot)').forEach(function (item) {
         initScheduleDrag(item);
       });
     } else {
@@ -1672,7 +1729,7 @@
         }
         reorderScheduleGroups(drag.taskId, newGroupIdx);
       } else if (drag.type === 'timer-reorder') {
-        // Individual item reorder in timer view
+        // Individual item reorder — leave empty slot behind
         var ph = timerSchedule.querySelector('.ts-drop-placeholder');
         var newIdx = 0;
         if (ph) {
@@ -1688,9 +1745,9 @@
         var schedule = getSchedule();
         var fromIdx = drag.sourceIdx;
         if (fromIdx !== newIdx && fromIdx !== newIdx - 1) {
-          var removed = schedule.items.splice(fromIdx, 1)[0];
-          var targetIdx = fromIdx < newIdx ? newIdx - 1 : newIdx;
-          schedule.items.splice(targetIdx, 0, removed);
+          var movedItem = schedule.items[fromIdx];
+          schedule.items[fromIdx] = { taskId: null, done: false };
+          schedule.items.splice(newIdx, 0, movedItem);
           saveSchedule(schedule);
         }
         updateTaskBanner();
@@ -2171,8 +2228,9 @@
   var lastAllDoneState = false;
   function checkAllDoneConfetti() {
     var schedule = getSchedule();
-    if (schedule.items.length === 0) { lastAllDoneState = false; return; }
-    var allDone = schedule.items.every(function (i) { return i.done; });
+    var realItems = schedule.items.filter(function (i) { return i.taskId; });
+    if (realItems.length === 0) { lastAllDoneState = false; return; }
+    var allDone = realItems.every(function (i) { return i.done; });
     if (allDone && !lastAllDoneState) {
       launchConfetti();
     }

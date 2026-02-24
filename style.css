@@ -1334,6 +1334,43 @@ body.light-theme .btn-theme-toggle::after {
 }
 
 /* ========================================
+   Empty slots
+   ======================================== */
+.ts-empty {
+  opacity: 0.35 !important;
+}
+
+.ts-dot-empty {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px dashed var(--text-faint);
+  flex-shrink: 0;
+}
+
+.ts-name-empty {
+  color: var(--text-faint) !important;
+  font-style: italic;
+}
+
+.schedule-empty-slot {
+  border: 2px dashed var(--border-color) !important;
+  border-left: 2px dashed var(--border-color) !important;
+  background: transparent !important;
+  opacity: 0.5;
+  cursor: default;
+  touch-action: auto;
+}
+
+.schedule-empty-label {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text-faint);
+  font-style: italic;
+  padding: 0 8px;
+}
+
+/* ========================================
    Streak counter
    ======================================== */
 #streak-counter {
@@ -1411,8 +1448,8 @@ body.light-theme .btn-theme-toggle::after {
 .timeline-now::before {
   content: 'Nu';
   position: absolute;
-  left: 0;
-  top: -8px;
+  left: -28px;
+  top: -6px;
   font-size: 10px;
   color: var(--accent);
   font-weight: 700;
