@@ -308,6 +308,27 @@ body.light-theme .btn-theme-toggle::after {
   opacity: 0.4;
 }
 
+.ts-item.ts-past {
+  opacity: 0.55;
+}
+
+.ts-item.ts-past .ts-name {
+  color: var(--text-muted);
+}
+
+.ts-mark-done {
+  color: #34d399 !important;
+  font-size: 14px !important;
+}
+
+.ts-mark-done:active {
+  background: rgba(52, 211, 153, 0.25) !important;
+}
+
+.ts-mark-remove:active {
+  background: rgba(233, 69, 96, 0.25) !important;
+}
+
 .ts-item.dragging {
   opacity: 0.15;
 }

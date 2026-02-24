@@ -353,10 +353,12 @@
       var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
       var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
       var color = getProjectColor(project);
+      var isPast = nowMin >= slotEnd;
 
       var cls = 'ts-item';
       if (item.done) cls += ' ts-done';
       else if (idx === currentIdx) cls += ' ts-current';
+      else if (isPast) cls += ' ts-past';
       else cls += ' ts-upcoming';
 
       var indicator = item.done
@@ -366,6 +368,13 @@
       var taskName = task ? task.name : 'Borttagen';
       var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
 
+      // Past undone items get check + remove buttons
+      var pastBtns = '';
+      if (isPast && !item.done) {
+        pastBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + idx + '" title="Markera klar">&check;</button>' +
+          '<button class="ts-mark-remove btn-tiny" data-idx="' + idx + '" title="Ta bort">&times;</button>';
+      }
+
       html += '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + (item.taskId || '') + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
         '<div class="ts-item-bg bg-done">Klar</div>' +
         '<div class="ts-item-bg bg-remove">Ta bort</div>' +
@@ -373,6 +382,7 @@
         '<span class="ts-time">' + timeLabel + '</span>' +
         indicator +
         '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
+        pastBtns +
         addBtn +
         '</div>' +
         '</div>';
@@ -390,6 +400,37 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         addPomodoroAfter(parseInt(btn.dataset.idx));
+      });
+    });
+
+    // Past item: mark done
+    timerSchedule.querySelectorAll('.ts-mark-done').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        haptic(12);
+        var schedule = getSchedule();
+        var i = parseInt(btn.dataset.idx);
+        if (i < schedule.items.length) {
+          schedule.items[i].done = true;
+          saveSchedule(schedule);
+          updateTaskBanner();
+          checkAllDoneConfetti();
+        }
+      });
+    });
+
+    // Past item: remove → empty slot
+    timerSchedule.querySelectorAll('.ts-mark-remove').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        haptic(12);
+        var schedule = getSchedule();
+        var i = parseInt(btn.dataset.idx);
+        if (i < schedule.items.length) {
+          schedule.items[i] = { taskId: null, done: false };
+          saveSchedule(schedule);
+          updateTaskBanner();
+        }
       });
     });
 
