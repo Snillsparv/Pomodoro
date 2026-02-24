@@ -471,7 +471,7 @@
     var taskId = el.dataset.taskId;
 
     function onStart(clientX, clientY, e) {
-      if (e.target.closest('.ts-add-pom')) return;
+      if (e.target.closest('.btn-tiny')) return;
       drag.active = true;
       drag.started = false;
       drag.type = 'timer-reorder';
