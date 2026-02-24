@@ -331,7 +331,7 @@
       var taskName = task ? task.name : 'Borttagen';
       var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
 
-      return '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + item.taskId + '">' +
+      return '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + item.taskId + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
         indicator +
         '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
         addBtn +
@@ -918,7 +918,7 @@
       return;
     }
 
-    projectsList.innerHTML = projects.map(function (proj) {
+    projectsList.innerHTML = projects.map(function (proj, pIdx) {
       var projTasks = tasks.filter(function (t) { return t.projectId === proj.id; });
       var taskHtml = projTasks.map(function (task) {
         var inSchedule = scheduledTaskIds.indexOf(task.id) !== -1;
@@ -931,7 +931,7 @@
       }).join('');
 
       var color = getProjectColor(proj);
-      return '<div class="project-card" style="border-left:4px solid ' + color + '">' +
+      return '<div class="project-card" style="border-left:4px solid ' + color + ';animation:item-in 0.3s ' + (pIdx * 0.06) + 's both">' +
         '<div class="project-header">' +
         '<span class="project-name" style="color:' + color + '">' + escapeHtml(proj.name) + '</span>' +
         '<div class="project-actions">' +
@@ -1098,7 +1098,7 @@
         var isDone = group.completed >= group.total;
 
         var color = getProjectColor(project);
-        return '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + '">' +
+        return '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + ';animation:item-in 0.25s ' + (gIdx * 0.05) + 's both">' +
           '<span class="schedule-drag-handle">&#9776;</span>' +
           '<div class="schedule-item-body">' +
           '<div class="schedule-item-info">' +
