@@ -18,6 +18,7 @@
       <button class="nav-btn active" data-view="timer">Timer</button>
       <button class="nav-btn" data-view="plan">Planera</button>
       <button class="nav-btn" data-view="stats">Statistik</button>
+      <button id="btn-theme-toggle" class="btn-theme-toggle" title="Byt tema">&#9789;</button>
     </nav>
 
     <!-- Timer View -->
@@ -31,6 +32,7 @@
         <button id="btn-reset">Nollst&auml;ll</button>
       </div>
       <div id="pomodoro-count"></div>
+      <div id="streak-counter"></div>
       <div id="timer-schedule"></div>
       <button id="btn-timer-add" class="btn-timer-add">+ L&auml;gg till</button>
     </div>
@@ -67,6 +69,10 @@
           <button id="schedule-prev">&larr;</button>
           <span id="schedule-date-label">Idag</span>
           <button id="schedule-next">&rarr;</button>
+        </div>
+        <div id="schedule-time-bar">
+          <span id="schedule-time-estimate"></span>
+          <label class="start-time-label">Start <input type="time" id="day-start-time" value="09:00"></label>
         </div>
         <div id="carryover-banner" class="carryover-banner hidden">
           <div class="carryover-text">
@@ -128,6 +134,11 @@
         <input type="text" id="task-detail-name" placeholder="Uppgiftsnamn..." autocomplete="off">
         <select id="task-detail-project"></select>
         <textarea id="task-detail-desc" placeholder="Beskrivning (valfritt)..." rows="4"></textarea>
+        <select id="task-detail-recurring">
+          <option value="">Ej &aring;terkommande</option>
+          <option value="daily">Daglig</option>
+          <option value="weekly">Veckovis</option>
+        </select>
         <button id="btn-save-task-detail">Spara</button>
         <div id="task-swap-section" class="hidden">
           <hr class="divider">
@@ -154,6 +165,7 @@
     </div>
   </div>
 
+  <canvas id="confetti-canvas"></canvas>
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {

@@ -332,9 +332,13 @@
       var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
 
       return '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + item.taskId + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
+        '<div class="ts-item-bg bg-done">Klar</div>' +
+        '<div class="ts-item-bg bg-remove">Ta bort</div>' +
+        '<div class="ts-item-inner">' +
         indicator +
         '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
         addBtn +
+        '</div>' +
         '</div>';
     }).join('');
 
@@ -346,9 +350,12 @@
       });
     });
 
-    // Timer schedule drag reorder
+    // Timer schedule drag reorder + swipe gestures
     timerSchedule.querySelectorAll('.ts-item').forEach(function (el) {
       initTimerScheduleDrag(el);
+      if (!el.classList.contains('ts-done')) {
+        initTimerSwipe(el, parseInt(el.dataset.idx));
+      }
     });
   }
 
@@ -605,6 +612,9 @@
 
     todayPomodoros++;
     updatePomodoroCount();
+    updateStreakCounter();
+    checkAllDoneConfetti();
+    haptic(20);
 
     // Start break
     isBreak = true;
@@ -615,6 +625,7 @@
 
   function startTimer() {
     if (isRunning) return;
+    haptic(12);
     // Unlock audio context on user gesture (required by mobile browsers)
     try {
       var ctx = getAudioCtx();
@@ -737,6 +748,8 @@
     hideLogModal();
     todayPomodoros++;
     updatePomodoroCount();
+    updateStreakCounter();
+    checkAllDoneConfetti();
 
     isBreak = true;
     timeLeft = BREAK_SECONDS;
@@ -904,6 +917,7 @@
     // Show/hide editing controls based on whether viewing today
     btnAddToSchedule.style.display = isToday ? '' : 'none';
     scheduleHeading.textContent = isToday ? 'Dagens schema' : 'Schema';
+    document.getElementById('schedule-time-bar').style.display = isToday ? '' : 'none';
   }
 
   // --- Projects ---
@@ -922,9 +936,11 @@
       var projTasks = tasks.filter(function (t) { return t.projectId === proj.id; });
       var taskHtml = projTasks.map(function (task) {
         var inSchedule = scheduledTaskIds.indexOf(task.id) !== -1;
+        var recurLabel = task.recurring ? (task.recurring === 'daily' ? 'daglig' : 'veckovis') : '';
         return '<div class="task-item' + (inSchedule ? ' in-schedule' : '') + '" data-task-id="' + task.id + '">' +
           '<span class="task-drag-handle">&#9776;</span>' +
           '<span class="task-name">' + escapeHtml(task.name) + '</span>' +
+          (recurLabel ? '<span class="recurring-badge">' + recurLabel + '</span>' : '') +
           (inSchedule ? '<span class="task-scheduled-badge">i schema</span>' : '') +
           '<button class="btn-delete-task btn-tiny" data-task-id="' + task.id + '">&times;</button>' +
           '</div>';
@@ -1091,29 +1107,63 @@
     scheduleEmpty.classList.add('hidden');
 
     if (isToday) {
+      updateTimeEstimate();
+      // Compute timeline start times for each group
+      var dayStart = getDayStartMinutes();
+      var cumMin = dayStart;
+      var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+      var nowInserted = false;
+
       // Editable today view — grouped by task
-      scheduleList.innerHTML = groups.map(function (group, gIdx) {
+      var html = '';
+      groups.forEach(function (group, gIdx) {
         var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
         var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
         var isDone = group.completed >= group.total;
-
         var color = getProjectColor(project);
-        return '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + ';animation:item-in 0.25s ' + (gIdx * 0.05) + 's both">' +
+
+        var groupEndMin = cumMin + group.total * WORK_MINUTES + (group.total - 1) * BREAK_MINUTES;
+
+        // Insert "now" line before this group if appropriate
+        if (!nowInserted && nowMin < groupEndMin && nowMin >= dayStart) {
+          if (nowMin >= cumMin || gIdx === 0) {
+            html += '<div class="timeline-now"></div>';
+            nowInserted = true;
+          }
+        }
+
+        var timeLabel = formatMinutesAsTime(cumMin);
+        var recurring = task && task.recurring;
+        var recurBadge = recurring ? '<span class="recurring-badge">' + (recurring === 'daily' ? 'daglig' : 'veckovis') + '</span>' : '';
+        var playBtn = isDone ? '' : '<button class="btn-play-task" data-task-id="' + group.taskId + '" title="Starta">&#9654;</button>';
+
+        html += '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + ';animation:item-in 0.25s ' + (gIdx * 0.05) + 's both">' +
+          '<span class="schedule-time-label">' + timeLabel + '</span>' +
           '<span class="schedule-drag-handle">&#9776;</span>' +
           '<div class="schedule-item-body">' +
           '<div class="schedule-item-info">' +
-          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + '</span>' +
+          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + recurBadge + '</span>' +
           '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
           '</div>' +
           '</div>' +
           '<div class="schedule-item-controls">' +
+          playBtn +
           '<button class="btn-pom-minus btn-tiny" data-task-id="' + group.taskId + '">&minus;</button>' +
           '<span class="schedule-pom-count">' + group.completed + '/' + group.total + '</span>' +
           '<button class="btn-pom-plus btn-tiny" data-task-id="' + group.taskId + '">+</button>' +
           '<button class="btn-remove-schedule btn-tiny" data-task-id="' + group.taskId + '">&times;</button>' +
           '</div>' +
           '</div>';
-      }).join('');
+
+        cumMin = groupEndMin + BREAK_MINUTES; // break between groups
+      });
+
+      // Insert "now" line at end if not yet inserted
+      if (!nowInserted && nowMin >= dayStart) {
+        html += '<div class="timeline-now"></div>';
+      }
+
+      scheduleList.innerHTML = html;
 
       // Event listeners
       scheduleList.querySelectorAll('.btn-pom-minus').forEach(function (btn) {
@@ -1129,6 +1179,12 @@
       scheduleList.querySelectorAll('.btn-remove-schedule').forEach(function (btn) {
         btn.addEventListener('click', function () {
           removeScheduleItem(btn.dataset.taskId);
+        });
+      });
+      scheduleList.querySelectorAll('.btn-play-task').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          playTask(btn.dataset.taskId);
         });
       });
 
@@ -1298,6 +1354,7 @@
         return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
       }).join('');
     taskDetailProject.value = task.projectId || '';
+    taskDetailRecurring.value = task.recurring || '';
 
     // Show swap section only when editing from timer view
     if (editingTimerIdx != null) {
@@ -1378,6 +1435,11 @@
         tasks[i].name = name;
         tasks[i].projectId = newProjectId;
         tasks[i].description = taskDetailDesc.value.trim();
+        var recurVal = taskDetailRecurring.value || null;
+        tasks[i].recurring = recurVal;
+        if (recurVal === 'weekly') {
+          tasks[i].recurDay = new Date().getDay();
+        }
         break;
       }
     }
@@ -1498,6 +1560,7 @@
       if (Math.sqrt(dx * dx + dy * dy) < drag.threshold) return;
       drag.started = true;
       drag.sourceEl.classList.add('dragging');
+      haptic(10);
 
       if (drag.type === 'task-to-schedule') {
         var tasks = getTasks();
@@ -1880,6 +1943,351 @@
   }
 
   // ========================================
+  // Theme toggle
+  // ========================================
+  var btnThemeToggle = document.getElementById('btn-theme-toggle');
+
+  function applyTheme(light) {
+    if (light) {
+      document.body.classList.add('light-theme');
+      btnThemeToggle.innerHTML = '&#9788;'; // sun
+      document.querySelector('meta[name="theme-color"]').content = '#f0f0f5';
+    } else {
+      document.body.classList.remove('light-theme');
+      btnThemeToggle.innerHTML = '&#9789;'; // moon
+      document.querySelector('meta[name="theme-color"]').content = '#1a1a2e';
+    }
+  }
+
+  btnThemeToggle.addEventListener('click', function () {
+    var isLight = document.body.classList.toggle('light-theme');
+    localStorage.setItem('pomodoro_theme', isLight ? 'light' : 'dark');
+    applyTheme(isLight);
+    haptic(10);
+  });
+
+  // ========================================
+  // Haptic feedback
+  // ========================================
+  function haptic(ms) {
+    try { if (navigator.vibrate) navigator.vibrate(ms || 8); } catch (e) {}
+  }
+
+  // ========================================
+  // Streak counter
+  // ========================================
+  var streakCounter = document.getElementById('streak-counter');
+
+  function calculateStreak() {
+    var sessions = getSessions();
+    if (sessions.length === 0) return 0;
+    var dates = {};
+    for (var i = 0; i < sessions.length; i++) {
+      dates[sessions[i].date] = true;
+    }
+    var d = new Date();
+    // If no session today, start from yesterday
+    if (!dates[d.toISOString().slice(0, 10)]) {
+      d.setDate(d.getDate() - 1);
+    }
+    var streak = 0;
+    while (dates[d.toISOString().slice(0, 10)]) {
+      streak++;
+      d.setDate(d.getDate() - 1);
+    }
+    return streak;
+  }
+
+  function updateStreakCounter() {
+    var streak = calculateStreak();
+    if (streak >= 2) {
+      streakCounter.textContent = streak + ' dagar i rad!';
+    } else {
+      streakCounter.textContent = '';
+    }
+  }
+
+  // ========================================
+  // Day start time & time estimate
+  // ========================================
+  var dayStartTimeInput = document.getElementById('day-start-time');
+  var scheduleTimeEstimate = document.getElementById('schedule-time-estimate');
+
+  dayStartTimeInput.value = localStorage.getItem('pomodoro_day_start') || '09:00';
+  dayStartTimeInput.addEventListener('change', function () {
+    localStorage.setItem('pomodoro_day_start', dayStartTimeInput.value);
+    renderSchedule();
+  });
+
+  function getDayStartMinutes() {
+    var val = dayStartTimeInput.value || '09:00';
+    var parts = val.split(':');
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  }
+
+  function formatMinutesAsTime(totalMin) {
+    var h = Math.floor(totalMin / 60) % 24;
+    var m = totalMin % 60;
+    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+  }
+
+  function updateTimeEstimate() {
+    var schedule = getSchedule();
+    var totalPoms = schedule.items.length;
+    if (totalPoms === 0) {
+      scheduleTimeEstimate.textContent = '';
+      return;
+    }
+    var totalMin = totalPoms * WORK_MINUTES + (totalPoms - 1) * BREAK_MINUTES;
+    var h = Math.floor(totalMin / 60);
+    var m = totalMin % 60;
+    var str = '~';
+    if (h > 0) str += h + 'h ';
+    str += m + 'min planerat';
+    scheduleTimeEstimate.textContent = str;
+  }
+
+  // ========================================
+  // Recurring tasks
+  // ========================================
+  var taskDetailRecurring = document.getElementById('task-detail-recurring');
+
+  function autoAddRecurringTasks() {
+    var tasks = getTasks();
+    var schedule = getSchedule();
+    var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
+    var today = new Date();
+    var dayOfWeek = today.getDay(); // 0=sun
+
+    var changed = false;
+    for (var i = 0; i < tasks.length; i++) {
+      var t = tasks[i];
+      if (!t.recurring) continue;
+      if (scheduledTaskIds.indexOf(t.id) !== -1) continue;
+
+      if (t.recurring === 'daily') {
+        schedule.items.push({ taskId: t.id, done: false });
+        scheduledTaskIds.push(t.id);
+        changed = true;
+      } else if (t.recurring === 'weekly') {
+        // Add on same weekday as creation, default monday (1)
+        var recurDay = t.recurDay != null ? t.recurDay : 1;
+        if (dayOfWeek === recurDay) {
+          schedule.items.push({ taskId: t.id, done: false });
+          scheduledTaskIds.push(t.id);
+          changed = true;
+        }
+      }
+    }
+    if (changed) saveSchedule(schedule);
+  }
+
+  // ========================================
+  // Confetti effect
+  // ========================================
+  var confettiCanvas = document.getElementById('confetti-canvas');
+  var confettiCtx = confettiCanvas.getContext('2d');
+  var confettiParticles = [];
+  var confettiRunning = false;
+
+  function launchConfetti() {
+    if (confettiRunning) return;
+    confettiRunning = true;
+    confettiCanvas.width = window.innerWidth;
+    confettiCanvas.height = window.innerHeight;
+    confettiParticles = [];
+
+    var colors = ['#e94560', '#53a8b6', '#f0a500', '#a855f7', '#34d399', '#f472b6', '#60a5fa', '#fb923c'];
+    for (var i = 0; i < 80; i++) {
+      confettiParticles.push({
+        x: Math.random() * confettiCanvas.width,
+        y: -20 - Math.random() * 200,
+        w: 6 + Math.random() * 6,
+        h: 4 + Math.random() * 4,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        vx: (Math.random() - 0.5) * 4,
+        vy: 2 + Math.random() * 4,
+        rot: Math.random() * Math.PI * 2,
+        rotV: (Math.random() - 0.5) * 0.2,
+        life: 1
+      });
+    }
+    haptic(50);
+    requestAnimationFrame(animateConfetti);
+  }
+
+  function animateConfetti() {
+    confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+    var alive = false;
+    for (var i = 0; i < confettiParticles.length; i++) {
+      var p = confettiParticles[i];
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vy += 0.1;
+      p.rot += p.rotV;
+      p.life -= 0.005;
+      if (p.life <= 0 || p.y > confettiCanvas.height + 20) continue;
+      alive = true;
+      confettiCtx.save();
+      confettiCtx.translate(p.x, p.y);
+      confettiCtx.rotate(p.rot);
+      confettiCtx.globalAlpha = p.life;
+      confettiCtx.fillStyle = p.color;
+      confettiCtx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      confettiCtx.restore();
+    }
+    if (alive) {
+      requestAnimationFrame(animateConfetti);
+    } else {
+      confettiRunning = false;
+      confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
+    }
+  }
+
+  var lastAllDoneState = false;
+  function checkAllDoneConfetti() {
+    var schedule = getSchedule();
+    if (schedule.items.length === 0) { lastAllDoneState = false; return; }
+    var allDone = schedule.items.every(function (i) { return i.done; });
+    if (allDone && !lastAllDoneState) {
+      launchConfetti();
+    }
+    lastAllDoneState = allDone;
+  }
+
+  // ========================================
+  // Swipe gestures on timer schedule items
+  // ========================================
+  function initTimerSwipe(el, idx) {
+    var startX = 0, currentX = 0, swiping = false;
+    var inner = el.querySelector('.ts-item-inner');
+    var bgDone = el.querySelector('.bg-done');
+    var bgRemove = el.querySelector('.bg-remove');
+    var threshold = 80;
+
+    function onTouchStart(e) {
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      currentX = startX;
+      swiping = true;
+      el.classList.add('swiping');
+    }
+
+    function onTouchMove(e) {
+      if (!swiping) return;
+      currentX = e.touches[0].clientX;
+      var dx = currentX - startX;
+      inner.style.transform = 'translateX(' + dx + 'px)';
+      if (dx > 20) {
+        bgDone.style.opacity = Math.min(1, (dx - 20) / threshold);
+        bgRemove.style.opacity = 0;
+      } else if (dx < -20) {
+        bgRemove.style.opacity = Math.min(1, (-dx - 20) / threshold);
+        bgDone.style.opacity = 0;
+      } else {
+        bgDone.style.opacity = 0;
+        bgRemove.style.opacity = 0;
+      }
+    }
+
+    function onTouchEnd() {
+      if (!swiping) return;
+      swiping = false;
+      el.classList.remove('swiping');
+      var dx = currentX - startX;
+      if (dx > threshold) {
+        // Swipe right → mark done
+        haptic(15);
+        el.classList.add('swipe-away');
+        setTimeout(function () {
+          var schedule = getSchedule();
+          if (idx < schedule.items.length) {
+            schedule.items[idx].done = true;
+            saveSchedule(schedule);
+            updateTaskBanner();
+            checkAllDoneConfetti();
+          }
+        }, 250);
+        return;
+      } else if (dx < -threshold) {
+        // Swipe left → remove
+        haptic(15);
+        el.classList.add('swipe-away-left');
+        setTimeout(function () {
+          var schedule = getSchedule();
+          if (idx < schedule.items.length) {
+            schedule.items.splice(idx, 1);
+            saveSchedule(schedule);
+            updateTaskBanner();
+          }
+        }, 250);
+        return;
+      }
+      // Snap back
+      inner.style.transform = '';
+      bgDone.style.opacity = 0;
+      bgRemove.style.opacity = 0;
+    }
+
+    el.addEventListener('touchstart', onTouchStart, { passive: true });
+    el.addEventListener('touchmove', onTouchMove, { passive: true });
+    el.addEventListener('touchend', onTouchEnd);
+  }
+
+  // ========================================
+  // Play button (quick-start from plan view)
+  // ========================================
+  function playTask(taskId) {
+    haptic(12);
+    // Ensure task is in schedule
+    var schedule = getSchedule();
+    var found = false;
+    for (var i = 0; i < schedule.items.length; i++) {
+      if (schedule.items[i].taskId === taskId && !schedule.items[i].done) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      schedule.items.push({ taskId: taskId, done: false });
+      saveSchedule(schedule);
+    }
+
+    // Reorder so this task's first undone item is at the front of undone items
+    schedule = getSchedule();
+    var firstUndone = -1;
+    for (var i = 0; i < schedule.items.length; i++) {
+      if (!schedule.items[i].done) {
+        firstUndone = i;
+        break;
+      }
+    }
+    var targetIdx = -1;
+    for (var i = 0; i < schedule.items.length; i++) {
+      if (schedule.items[i].taskId === taskId && !schedule.items[i].done) {
+        targetIdx = i;
+        break;
+      }
+    }
+    if (targetIdx > firstUndone) {
+      var item = schedule.items.splice(targetIdx, 1)[0];
+      schedule.items.splice(firstUndone, 0, item);
+      saveSchedule(schedule);
+    }
+
+    // Switch to timer view and start
+    navBtns.forEach(function (b) { b.classList.remove('active'); });
+    navBtns[0].classList.add('active');
+    views.forEach(function (v) { v.classList.remove('active'); });
+    document.getElementById('timer-view').classList.add('active');
+    updateTaskBanner();
+
+    if (!isRunning && !isBreak) {
+      startTimer();
+    }
+  }
+
+  // ========================================
   // Init
   // ========================================
 
@@ -1908,7 +2316,14 @@
     if (changed) saveProjects(projects);
   })();
 
+  // Apply saved theme
+  applyTheme(localStorage.getItem('pomodoro_theme') === 'light');
+
+  // Auto-add recurring tasks for today
+  autoAddRecurringTasks();
+
   updateDisplay();
   countTodayPomodoros();
   updateTaskBanner();
+  updateStreakCounter();
 })();
