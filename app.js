@@ -2290,6 +2290,7 @@
 
     function onTouchStart(e) {
       if (e.touches.length !== 1) return;
+      if (e.target.closest('.btn-tiny')) return;
       startX = e.touches[0].clientX;
       currentX = startX;
       swiping = true;
@@ -2449,4 +2450,9 @@
   countTodayPomodoros();
   updateTaskBanner();
   updateStreakCounter();
+
+  // Update now-line position every 60 s
+  setInterval(function () {
+    if (!isRunning) updateTaskBanner();
+  }, 60000);
 })();
