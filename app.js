@@ -1275,6 +1275,7 @@
   // ========================================
   var taskDetailModal = document.getElementById('task-detail-modal');
   var taskDetailName = document.getElementById('task-detail-name');
+  var taskDetailProject = document.getElementById('task-detail-project');
   var taskDetailDesc = document.getElementById('task-detail-desc');
   var btnSaveTaskDetail = document.getElementById('btn-save-task-detail');
   var editingTaskId = null;
@@ -1286,6 +1287,13 @@
     editingTaskId = taskId;
     taskDetailName.value = task.name;
     taskDetailDesc.value = task.description || '';
+    // Populate project dropdown
+    var projects = getProjects();
+    taskDetailProject.innerHTML = '<option value="">\u00d6vrigt</option>' +
+      projects.map(function (p) {
+        return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
+      }).join('');
+    taskDetailProject.value = task.projectId || '';
     taskDetailModal.classList.remove('hidden');
     taskDetailName.focus();
   }
@@ -1302,10 +1310,12 @@
     if (!editingTaskId) return;
     var name = taskDetailName.value.trim();
     if (!name) return;
+    var newProjectId = taskDetailProject.value || null;
     var tasks = getTasks();
     for (var i = 0; i < tasks.length; i++) {
       if (tasks[i].id === editingTaskId) {
         tasks[i].name = name;
+        tasks[i].projectId = newProjectId;
         tasks[i].description = taskDetailDesc.value.trim();
         break;
       }
