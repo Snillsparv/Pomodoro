@@ -314,7 +314,22 @@
       }
     }
 
-    timerSchedule.innerHTML = schedule.items.map(function (item, idx) {
+    // Compute per-slot start times
+    var dayStart = getDayStartMinutes();
+    var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    var nowInserted = false;
+    var html = '';
+
+    schedule.items.forEach(function (item, idx) {
+      var slotStart = dayStart + idx * (WORK_MINUTES + BREAK_MINUTES);
+      var slotEnd = slotStart + WORK_MINUTES;
+
+      // Insert "now" line before this slot if current time falls here
+      if (!nowInserted && nowMin < slotEnd && nowMin >= dayStart) {
+        html += '<div class="timeline-now"></div>';
+        nowInserted = true;
+      }
+
       var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
       var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
       var color = getProjectColor(project);
@@ -330,17 +345,26 @@
 
       var taskName = task ? task.name : 'Borttagen';
       var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
+      var timeLabel = formatMinutesAsTime(slotStart);
 
-      return '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + item.taskId + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
+      html += '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + item.taskId + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
         '<div class="ts-item-bg bg-done">Klar</div>' +
         '<div class="ts-item-bg bg-remove">Ta bort</div>' +
         '<div class="ts-item-inner">' +
+        '<span class="ts-time">' + timeLabel + '</span>' +
         indicator +
         '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
         addBtn +
         '</div>' +
         '</div>';
-    }).join('');
+    });
+
+    // "Now" line at end if not yet placed
+    if (!nowInserted && nowMin >= dayStart) {
+      html += '<div class="timeline-now"></div>';
+    }
+
+    timerSchedule.innerHTML = html;
 
     // + button: add another pomodoro after this one
     timerSchedule.querySelectorAll('.ts-add-pom').forEach(function (btn) {

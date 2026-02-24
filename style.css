@@ -1427,6 +1427,19 @@ body.light-theme .btn-theme-toggle::after {
   overflow: hidden;
 }
 
+.ts-time {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  min-width: 38px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.ts-item.ts-current .ts-time {
+  color: var(--text-dim);
+}
+
 .ts-item-bg {
   position: absolute;
   inset: 0;
