@@ -339,7 +339,7 @@
 
       // Empty slot
       if (!item.taskId) {
-        html += '<div class="ts-item ts-empty" data-idx="' + idx + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
+        html += '<div class="ts-item ts-empty" data-idx="' + idx + '">' +
           '<div class="ts-item-inner">' +
           '<span class="ts-time">' + timeLabel + '</span>' +
           '<span class="ts-dot-empty"></span>' +
@@ -379,7 +379,7 @@
         }
       }
 
-      html += '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + (item.taskId || '') + '" style="animation:item-in 0.25s ' + (idx * 0.04) + 's both">' +
+      html += '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + (item.taskId || '') + '">' +
         '<div class="ts-item-bg bg-done">Klar</div>' +
         '<div class="ts-item-bg bg-remove">Ta bort</div>' +
         '<div class="ts-item-inner">' +
