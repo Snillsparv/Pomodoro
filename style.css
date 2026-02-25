@@ -1605,6 +1605,63 @@ body.light-theme .btn-theme-toggle::after {
 }
 
 /* ========================================
+   Non-work category
+   ======================================== */
+.non-work-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  flex-shrink: 0;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border: 1px solid var(--text-faint);
+  border-radius: 4px;
+  font-weight: 500;
+  vertical-align: middle;
+}
+
+.non-work-item {
+  opacity: 0.7;
+}
+
+.non-work-project {
+  opacity: 0.85;
+}
+
+.ts-non-work .ts-name {
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+.checkbox-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+  cursor: pointer;
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.checkbox-hint {
+  width: 100%;
+  font-size: 13px;
+  color: var(--text-muted);
+  padding-left: 28px;
+}
+
+/* ========================================
    Confetti canvas
    ======================================== */
 #confetti-canvas {

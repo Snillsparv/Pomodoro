@@ -12,6 +12,8 @@
     '#34d399', '#f472b6', '#60a5fa', '#fb923c'
   ];
 
+  var NON_WORK_COLOR = '#8888aa';
+
   // --- Timer Worker (immune to background-tab throttling) ---
   var timerWorker = null;
   try {
@@ -196,8 +198,19 @@
 
   function getProjectColor(project) {
     if (!project) return '#8888aa';
+    if (project.nonWork) return NON_WORK_COLOR;
     if (project.color) return project.color;
     return PROJECT_COLORS[0];
+  }
+
+  function isNonWorkTask(taskId) {
+    if (!taskId) return false;
+    var tasks = getTasks();
+    var projects = getProjects();
+    var task = tasks.filter(function (t) { return t.id === taskId; })[0];
+    if (!task) return false;
+    var project = projects.filter(function (p) { return p.id === task.projectId; })[0];
+    return project ? !!project.nonWork : false;
   }
 
   function nextProjectColor() {
@@ -278,6 +291,7 @@
     var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
     var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
 
+    var isNonWork = project ? !!project.nonWork : false;
     var projectName = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
     var taskName = task ? task.name : 'Okänd uppgift';
     // Compute progress for this task across all items
@@ -354,8 +368,10 @@
       var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
       var color = getProjectColor(project);
       var isPast = nowMin >= slotEnd;
+      var nonWork = project ? !!project.nonWork : false;
 
       var cls = 'ts-item';
+      if (nonWork) cls += ' ts-non-work';
       if (item.done) cls += ' ts-done';
       else if (idx === currentIdx) cls += ' ts-current';
       else if (isPast) cls += ' ts-past';
@@ -706,26 +722,29 @@
     var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
     var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
 
+    var isNonWork = project ? !!project.nonWork : false;
     var projLabel = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
     var activityName = (projLabel ? projLabel + ' — ' : '') + (task ? task.name : 'Okänd');
-
-    // Save session
-    var sessions = getSessions();
-    sessions.push({
-      activity: activityName,
-      duration: WORK_MINUTES,
-      date: todayStr(),
-      timestamp: Date.now()
-    });
-    saveSessions(sessions);
 
     // Mark this pomodoro as done
     item.done = true;
     saveSchedule(schedule);
 
-    todayPomodoros++;
-    updatePomodoroCount();
-    updateStreakCounter();
+    // Only log session and count for work tasks
+    if (!isNonWork) {
+      var sessions = getSessions();
+      sessions.push({
+        activity: activityName,
+        duration: WORK_MINUTES,
+        date: todayStr(),
+        timestamp: Date.now()
+      });
+      saveSessions(sessions);
+
+      todayPomodoros++;
+      updatePomodoroCount();
+      updateStreakCounter();
+    }
     checkAllDoneConfetti();
     haptic(20);
 
@@ -1060,9 +1079,10 @@
       }).join('');
 
       var color = getProjectColor(proj);
-      return '<div class="project-card" style="border-left:4px solid ' + color + '">' +
+      var nonWorkBadge = proj.nonWork ? '<span class="non-work-badge">Ej arbete</span>' : '';
+      return '<div class="project-card' + (proj.nonWork ? ' non-work-project' : '') + '" style="border-left:4px solid ' + color + '">' +
         '<div class="project-header">' +
-        '<span class="project-name" style="color:' + color + '">' + escapeHtml(proj.name) + '</span>' +
+        '<span class="project-name" style="color:' + color + '">' + escapeHtml(proj.name) + nonWorkBadge + '</span>' +
         '<div class="project-actions">' +
         '<button class="btn-add-task btn-tiny" data-project-id="' + proj.id + '">+</button>' +
         '<button class="btn-delete-project btn-tiny" data-project-id="' + proj.id + '">&times;</button>' +
@@ -1109,6 +1129,7 @@
 
   btnAddProject.addEventListener('click', function () {
     projectNameInput.value = '';
+    document.getElementById('project-nonwork-input').checked = false;
     projectModal.classList.remove('hidden');
     projectNameInput.focus();
   });
@@ -1121,11 +1142,13 @@
   function saveProject() {
     var name = projectNameInput.value.trim();
     if (!name) return;
-    var color = nextProjectColor();
+    var nonWork = document.getElementById('project-nonwork-input').checked;
+    var color = nonWork ? NON_WORK_COLOR : nextProjectColor();
     var projects = getProjects();
-    projects.push({ id: generateId(), name: name, color: color });
+    projects.push({ id: generateId(), name: name, color: color, nonWork: nonWork });
     saveProjects(projects);
     projectModal.classList.add('hidden');
+    document.getElementById('project-nonwork-input').checked = false;
     renderProjects();
   }
 
@@ -1264,17 +1287,19 @@
         var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
         var isDone = group.completed >= group.total;
         var color = getProjectColor(project);
+        var nonWork = project ? !!project.nonWork : false;
 
         var recurring = task && task.recurring;
         var recurBadge = recurring ? '<span class="recurring-badge">' + (recurring === 'daily' ? 'daglig' : 'veckovis') + '</span>' : '';
+        var nonWorkBadge = nonWork ? '<span class="non-work-badge">ej arbete</span>' : '';
         var playBtn = isDone ? '' : '<button class="btn-play-task" data-task-id="' + group.taskId + '" title="Starta">&#9654;</button>';
 
-        html += '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + '">' +
+        html += '<div class="schedule-item' + (isDone ? ' done' : '') + (nonWork ? ' non-work-item' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + '">' +
           '<span class="schedule-time-label">' + timeLabel + '</span>' +
           '<span class="schedule-drag-handle">&#9776;</span>' +
           '<div class="schedule-item-body">' +
           '<div class="schedule-item-info">' +
-          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + recurBadge + '</span>' +
+          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + recurBadge + nonWorkBadge + '</span>' +
           '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
           '</div>' +
           '</div>' +
@@ -1342,9 +1367,10 @@
         var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
         var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
         var isDone = group.completed >= group.total;
+        var nonWork = project ? !!project.nonWork : false;
 
         var color = getProjectColor(project);
-        return '<div class="schedule-item history-item' + (isDone ? ' done' : '') + '" style="border-left:4px solid ' + color + '">' +
+        return '<div class="schedule-item history-item' + (isDone ? ' done' : '') + (nonWork ? ' non-work-item' : '') + '" style="border-left:4px solid ' + color + '">' +
           '<div class="schedule-item-body">' +
           '<div class="schedule-item-info">' +
           '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + '</span>' +
@@ -1446,8 +1472,9 @@
       }).join('');
 
       var color = getProjectColor(proj);
+      var nonWorkLabel = proj.nonWork ? ' <span class="non-work-badge">ej arbete</span>' : '';
       return '<div class="picker-project">' +
-        '<div class="picker-project-name" style="color:' + color + '">' + escapeHtml(proj.name) + '</div>' +
+        '<div class="picker-project-name" style="color:' + color + '">' + escapeHtml(proj.name) + nonWorkLabel + '</div>' +
         '<div class="picker-tasks">' + taskBtns + '</div>' +
         '</div>';
     }).join('');
@@ -2192,7 +2219,23 @@
     var m = totalMin % 60;
     var str = '~';
     if (h > 0) str += h + 'h ';
-    str += m + 'min planerat';
+    str += m + 'min totalt';
+
+    // Count work-only pomodoros
+    var workPoms = 0;
+    for (var i = 0; i < schedule.items.length; i++) {
+      if (schedule.items[i].taskId && !isNonWorkTask(schedule.items[i].taskId)) {
+        workPoms++;
+      }
+    }
+    if (workPoms < totalPoms && workPoms > 0) {
+      var workMin = workPoms * WORK_MINUTES;
+      var wh = Math.floor(workMin / 60);
+      var wm = workMin % 60;
+      str += ' (';
+      if (wh > 0) str += wh + 'h ';
+      str += wm + 'min arbete)';
+    }
     scheduleTimeEstimate.textContent = str;
   }
 
