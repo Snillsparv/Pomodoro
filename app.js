@@ -1045,7 +1045,7 @@
         var inSchedule = scheduledTaskIds.indexOf(task.id) !== -1;
         var recurLabel = task.recurring ? (task.recurring === 'daily' ? 'daglig' : 'veckovis') : '';
         return '<div class="task-item' + (inSchedule ? ' in-schedule' : '') + '" data-task-id="' + task.id + '">' +
-          '<span class="task-drag-handle">&#9776;</span>' +
+          '<button class="btn-edit-task btn-tiny" data-task-id="' + task.id + '">&#9998;</button>' +
           '<span class="task-name">' + escapeHtml(task.name) + '</span>' +
           (recurLabel ? '<span class="recurring-badge">' + recurLabel + '</span>' : '') +
           (inSchedule ? '<span class="task-scheduled-badge">i schema</span>' : '') +
@@ -1054,7 +1054,7 @@
       }).join('');
 
       var color = getProjectColor(proj);
-      return '<div class="project-card" style="border-left:4px solid ' + color + ';animation:item-in 0.3s ' + (pIdx * 0.06) + 's both">' +
+      return '<div class="project-card" style="border-left:4px solid ' + color + '">' +
         '<div class="project-header">' +
         '<span class="project-name" style="color:' + color + '">' + escapeHtml(proj.name) + '</span>' +
         '<div class="project-actions">' +
@@ -1088,7 +1088,14 @@
       });
     });
 
-    // Task items: tap to edit, drag to schedule
+    projectsList.querySelectorAll('.btn-edit-task').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openTaskDetail(btn.dataset.taskId);
+      });
+    });
+
+    // Task items: tap to add to schedule, drag to schedule
     projectsList.querySelectorAll('.task-item').forEach(function (el) {
       initTaskDrag(el);
     });
@@ -1238,7 +1245,7 @@
 
         // Empty slot
         if (!group.taskId) {
-          html += '<div class="schedule-item schedule-empty-slot" data-gidx="' + gIdx + '" data-flat-idx="' + group.flatIdx + '" style="animation:item-in 0.25s ' + (gIdx * 0.05) + 's both">' +
+          html += '<div class="schedule-item schedule-empty-slot" data-gidx="' + gIdx + '" data-flat-idx="' + group.flatIdx + '">' +
             '<span class="schedule-time-label">' + timeLabel + '</span>' +
             '<span class="schedule-empty-label">Ledig</span>' +
             '<button class="btn-remove-empty-slot btn-tiny" data-flat-idx="' + group.flatIdx + '">&times;</button>' +
@@ -1256,7 +1263,7 @@
         var recurBadge = recurring ? '<span class="recurring-badge">' + (recurring === 'daily' ? 'daglig' : 'veckovis') + '</span>' : '';
         var playBtn = isDone ? '' : '<button class="btn-play-task" data-task-id="' + group.taskId + '" title="Starta">&#9654;</button>';
 
-        html += '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + ';animation:item-in 0.25s ' + (gIdx * 0.05) + 's both">' +
+        html += '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + '">' +
           '<span class="schedule-time-label">' + timeLabel + '</span>' +
           '<span class="schedule-drag-handle">&#9776;</span>' +
           '<div class="schedule-item-body">' +
@@ -1630,8 +1637,8 @@
     var taskId = el.dataset.taskId;
 
     function onStart(clientX, clientY, e) {
-      // Don't drag from delete button
-      if (e.target.classList.contains('btn-delete-task') || e.target.classList.contains('btn-tiny')) return;
+      // Don't drag from buttons
+      if (e.target.closest('.btn-tiny')) return;
       drag.active = true;
       drag.started = false;
       drag.type = 'task-to-schedule';
@@ -1803,8 +1810,13 @@
         updateTaskBanner();
       }
     } else if (drag.taskId) {
-      // Wasn't a drag (no movement) → open task detail
-      if (drag.type === 'timer-reorder') {
+      // Wasn't a drag (no movement)
+      if (drag.type === 'task-to-schedule') {
+        // Tap on task in plan view → add to schedule
+        addToSchedule(drag.taskId);
+        renderSchedule();
+        renderProjects();
+      } else if (drag.type === 'timer-reorder') {
         openTaskDetail(drag.taskId, drag.sourceIdx);
       } else {
         openTaskDetail(drag.taskId);
