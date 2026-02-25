@@ -591,6 +591,12 @@
   });
 
   function playAlarm(type) {
+    playAlarmOnce(type);
+    setTimeout(function () { playAlarmOnce(type); }, 1500);
+    setTimeout(function () { playAlarmOnce(type); }, 3000);
+  }
+
+  function playAlarmOnce(type) {
     // Primary: <audio> element — works reliably in background tabs
     try {
       var audio = new Audio(alarmUrls[type] || alarmUrls.work);
