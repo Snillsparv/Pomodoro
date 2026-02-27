@@ -361,14 +361,14 @@
           ? '<span class="ts-check">&check;</span>'
           : '<span class="ts-dot" style="background:' + color + '"></span>';
 
-        var pastBtns = '';
-        if (!item.done) {
-          if (isPast) {
-            pastBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + i + '" title="Markera klar">&check;</button>' +
-              '<button class="ts-mark-remove btn-tiny" data-idx="' + i + '" title="Ta bort">&times;</button>';
-          } else {
-            pastBtns = '<button class="ts-mark-remove btn-tiny" data-idx="' + i + '" title="Ta bort">&times;</button>';
-          }
+        var actionBtns = '';
+        if (item.done) {
+          actionBtns = '<button class="ts-add-pom btn-tiny" data-idx="' + i + '" title="Lägg till pomodoro">+</button>';
+        } else if (isPast) {
+          actionBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + i + '" title="Markera klar">&check;</button>' +
+            '<button class="ts-mark-remove btn-tiny" data-idx="' + i + '" title="Ta bort">&times;</button>';
+        } else {
+          actionBtns = '<button class="ts-mark-remove btn-tiny" data-idx="' + i + '" title="Ta bort">&times;</button>';
         }
 
         html += '<div class="' + cls + '" data-idx="' + i + '" data-task-id="' + item.taskId + '">' +
@@ -378,7 +378,7 @@
           '<span class="ts-time">' + timeLabel + '</span>' +
           indicator +
           '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
-          pastBtns +
+          actionBtns +
           '</div>' +
           '</div>';
       } else {
@@ -428,6 +428,15 @@
           saveSchedule(schedule);
           updateTaskBanner();
         }
+      });
+    });
+
+    // Add pomodoro button on done items
+    timerSchedule.querySelectorAll('.ts-add-pom').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        haptic(12);
+        addPomodoroAfter(parseInt(btn.dataset.idx));
       });
     });
 
