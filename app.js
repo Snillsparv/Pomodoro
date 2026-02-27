@@ -305,29 +305,40 @@
     var tasks = getTasks();
     var projects = getProjects();
 
-    if (schedule.items.length === 0) {
+    // Filter to only items with tasks (skip empty slots for timer view)
+    var timerItems = [];
+    for (var i = 0; i < schedule.items.length; i++) {
+      if (schedule.items[i].taskId) {
+        timerItems.push({ item: schedule.items[i], origIdx: i });
+      }
+    }
+
+    if (timerItems.length === 0) {
       timerSchedule.innerHTML = '';
       return;
     }
 
     // Find current (first not-done) index
     var currentIdx = -1;
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (!schedule.items[i].done) {
+    for (var i = 0; i < timerItems.length; i++) {
+      if (!timerItems[i].item.done) {
         currentIdx = i;
         break;
       }
     }
 
-    // Compute per-slot start times
+    // Compute per-slot start times based on grid position
     var dayStart = getDayStartMinutes();
     var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
     var nowInserted = false;
     var html = '';
 
-    schedule.items.forEach(function (item, idx) {
-      var slotStart = dayStart + idx * (WORK_MINUTES + BREAK_MINUTES);
+    timerItems.forEach(function (entry, idx) {
+      var item = entry.item;
+      var slotStart = dayStart + entry.origIdx * 30;
       var slotEnd = slotStart + WORK_MINUTES;
+
+      var origIdx = entry.origIdx;
 
       // Insert "now" line before this slot if current time falls here
       if (!nowInserted && nowMin < slotEnd && nowMin >= dayStart) {
@@ -336,19 +347,6 @@
       }
 
       var timeLabel = formatMinutesAsTime(slotStart);
-
-      // Empty slot
-      if (!item.taskId) {
-        html += '<div class="ts-item ts-empty" data-idx="' + idx + '">' +
-          '<div class="ts-item-inner">' +
-          '<span class="ts-time">' + timeLabel + '</span>' +
-          '<span class="ts-dot-empty"></span>' +
-          '<span class="ts-name ts-name-empty">Ledig</span>' +
-          '<button class="ts-remove-empty btn-tiny" data-idx="' + idx + '">&times;</button>' +
-          '</div>' +
-          '</div>';
-        return;
-      }
 
       var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
       var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
@@ -366,20 +364,19 @@
         : '<span class="ts-dot" style="background:' + color + '"></span>';
 
       var taskName = task ? task.name : 'Borttagen';
-      var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
 
       // Action buttons for undone items
       var pastBtns = '';
       if (!item.done) {
         if (isPast) {
-          pastBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + idx + '" title="Markera klar">&check;</button>' +
-            '<button class="ts-mark-remove btn-tiny" data-idx="' + idx + '" title="Ta bort">&times;</button>';
+          pastBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + origIdx + '" title="Markera klar">&check;</button>' +
+            '<button class="ts-mark-remove btn-tiny" data-idx="' + origIdx + '" title="Ta bort">&times;</button>';
         } else {
-          pastBtns = '<button class="ts-mark-remove btn-tiny" data-idx="' + idx + '" title="Ta bort">&times;</button>';
+          pastBtns = '<button class="ts-mark-remove btn-tiny" data-idx="' + origIdx + '" title="Ta bort">&times;</button>';
         }
       }
 
-      html += '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + (item.taskId || '') + '">' +
+      html += '<div class="' + cls + '" data-idx="' + origIdx + '" data-task-id="' + (item.taskId || '') + '">' +
         '<div class="ts-item-bg bg-done">Klar</div>' +
         '<div class="ts-item-bg bg-remove">Ta bort</div>' +
         '<div class="ts-item-inner">' +
@@ -387,7 +384,6 @@
         indicator +
         '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
         pastBtns +
-        addBtn +
         '</div>' +
         '</div>';
     });
@@ -398,14 +394,6 @@
     }
 
     timerSchedule.innerHTML = html;
-
-    // + button: add another pomodoro after this one
-    timerSchedule.querySelectorAll('.ts-add-pom').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        addPomodoroAfter(parseInt(btn.dataset.idx));
-      });
-    });
 
     // Past item: mark done
     timerSchedule.querySelectorAll('.ts-mark-done').forEach(function (btn) {
@@ -423,7 +411,7 @@
       });
     });
 
-    // Remove item: past → empty slot, upcoming/current → splice
+    // Remove item: clear slot (set to empty)
     timerSchedule.querySelectorAll('.ts-mark-remove').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -431,26 +419,7 @@
         var schedule = getSchedule();
         var i = parseInt(btn.dataset.idx);
         if (i < schedule.items.length) {
-          var el = btn.closest('.ts-item');
-          if (el && el.classList.contains('ts-past')) {
-            schedule.items[i] = { taskId: null, done: false };
-          } else {
-            schedule.items.splice(i, 1);
-          }
-          saveSchedule(schedule);
-          updateTaskBanner();
-        }
-      });
-    });
-
-    // Remove empty slot buttons
-    timerSchedule.querySelectorAll('.ts-remove-empty').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        var schedule = getSchedule();
-        var i = parseInt(btn.dataset.idx);
-        if (i < schedule.items.length && !schedule.items[i].taskId) {
-          schedule.items.splice(i, 1);
+          schedule.items[i] = { taskId: null, done: false };
           saveSchedule(schedule);
           updateTaskBanner();
         }
@@ -923,22 +892,15 @@
   function carryoverTasks() {
     var carryover = getCarryoverItems();
     if (!carryover) return;
-    var schedule = getSchedule();
-    var existingTaskIds = schedule.items.map(function (i) { return i.taskId; });
-    // Group carryover items by task to avoid duplicate tasks
+    // Add each carryover task to first available empty slot
     var added = {};
     for (var i = 0; i < carryover.items.length; i++) {
       var item = carryover.items[i];
-      if (existingTaskIds.indexOf(item.taskId) === -1 || added[item.taskId]) {
-        schedule.items.push({ taskId: item.taskId, done: false });
+      if (!added[item.taskId]) {
+        addToSchedule(item.taskId, -1);
         added[item.taskId] = true;
-        // Track so we don't add same task from existingTaskIds check on next iteration
-        if (existingTaskIds.indexOf(item.taskId) === -1) {
-          existingTaskIds.push(item.taskId);
-        }
       }
     }
-    saveSchedule(schedule);
     dismissCarryover();
     renderPlanView();
     updateTaskBanner();
@@ -1209,162 +1171,177 @@
   });
 
   // --- Schedule ---
+  // Variable to track which slot index the user clicked for the picker
+  var pickerTargetSlotIdx = -1;
+
   function renderSchedule() {
     var viewDate = scheduleViewDate || todayStr();
     var isToday = viewDate === todayStr();
     var schedule = isToday ? getSchedule() : getScheduleForDate(viewDate);
     var tasks = getTasks();
     var projects = getProjects();
+
+    if (isToday) {
+      renderScheduleGrid(schedule, tasks, projects);
+    } else {
+      renderScheduleHistory(schedule, tasks, projects);
+    }
+  }
+
+  function renderScheduleGrid(schedule, tasks, projects) {
+    scheduleEmpty.classList.add('hidden');
+    updateTimeEstimate();
+
+    var slotCount = getSlotCount();
+    var dayStart = getDayStartMinutes();
+    var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+
+    // Ensure schedule items array matches slot count (pad or trim)
+    while (schedule.items.length < slotCount) {
+      schedule.items.push({ taskId: null, done: false });
+    }
+    // Save if we padded
+    var storedSchedule = JSON.parse(localStorage.getItem('pomodoro_schedule') || '{}');
+    var storedLen = storedSchedule.items ? storedSchedule.items.length : 0;
+    if (schedule.items.length !== storedLen) {
+      saveSchedule(schedule);
+    }
+
+    var html = '<div class="timeslot-grid">';
+
+    for (var i = 0; i < slotCount; i++) {
+      var slotMin = dayStart + i * 30;
+      var isHourStart = (slotMin % 60 === 0);
+      var isHalfHour = (slotMin % 60 === 30);
+      var timeLabel = formatMinutesAsTime(slotMin);
+      var item = schedule.items[i];
+
+      var rowClass = 'timeslot-row';
+      if (isHourStart) rowClass += ' hour-start';
+      if (isHalfHour) rowClass += ' half-hour';
+
+      html += '<div class="' + rowClass + '" data-slot-idx="' + i + '">';
+
+      // Time label
+      html += '<div class="timeslot-time">' + timeLabel + '</div>';
+
+      // Now indicator
+      var slotEnd = slotMin + 30;
+      if (nowMin >= slotMin && nowMin < slotEnd) {
+        var pct = ((nowMin - slotMin) / 30) * 100;
+        html += '<div class="timeslot-now-line" style="top:' + pct + '%"></div>';
+      }
+
+      if (item.taskId) {
+        // Filled slot
+        var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
+        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+        var color = getProjectColor(project);
+        var taskName = task ? task.name : 'Borttagen';
+        var projectName = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
+
+        var cellClass = 'timeslot-cell filled';
+        if (item.done) cellClass += ' done';
+
+        html += '<div class="' + cellClass + '" data-slot-idx="' + i + '" data-task-id="' + item.taskId + '" style="border-left:3px solid ' + color + '">' +
+          '<span class="timeslot-dot" style="background:' + color + '"></span>' +
+          '<span class="timeslot-task-name">' + escapeHtml(taskName) + '</span>' +
+          '<span class="timeslot-project-name" style="color:' + color + '">' + escapeHtml(projectName) + '</span>' +
+          '<div class="timeslot-actions">' +
+          '<button class="btn-slot-remove btn-tiny" data-slot-idx="' + i + '" title="Ta bort">&times;</button>' +
+          '</div>' +
+          '</div>';
+      } else {
+        // Empty slot
+        html += '<div class="timeslot-cell empty" data-slot-idx="' + i + '">' +
+          '<span class="timeslot-placeholder">+</span>' +
+          '</div>';
+      }
+
+      html += '</div>'; // close timeslot-row
+    }
+
+    html += '</div>'; // close timeslot-grid
+
+    scheduleList.innerHTML = html;
+
+    // Event: click on empty slot → open picker for that slot
+    scheduleList.querySelectorAll('.timeslot-cell.empty').forEach(function (cell) {
+      cell.addEventListener('click', function () {
+        pickerTargetSlotIdx = parseInt(cell.dataset.slotIdx);
+        renderSchedulePicker();
+        scheduleModal.classList.remove('hidden');
+      });
+    });
+
+    // Event: click on filled slot → open task detail
+    scheduleList.querySelectorAll('.timeslot-cell.filled').forEach(function (cell) {
+      cell.addEventListener('click', function (e) {
+        if (e.target.closest('.btn-tiny')) return;
+        openTaskDetail(cell.dataset.taskId);
+      });
+    });
+
+    // Event: remove slot content
+    scheduleList.querySelectorAll('.btn-slot-remove').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var idx = parseInt(btn.dataset.slotIdx);
+        var schedule = getSchedule();
+        if (idx < schedule.items.length) {
+          schedule.items[idx] = { taskId: null, done: false };
+          saveSchedule(schedule);
+          renderPlanView();
+          updateTaskBanner();
+        }
+      });
+    });
+
+    // Init drag on filled slots
+    scheduleList.querySelectorAll('.timeslot-cell.filled').forEach(function (cell) {
+      initSlotDrag(cell);
+    });
+  }
+
+  function renderScheduleHistory(schedule, tasks, projects) {
     var groups = groupScheduleItems(schedule.items);
 
     if (groups.length === 0) {
       scheduleList.innerHTML = '';
       scheduleEmpty.classList.remove('hidden');
-      scheduleEmpty.textContent = isToday ? 'Dra uppgifter hit eller tryck +' : 'Inget schema denna dag';
+      scheduleEmpty.textContent = 'Inget schema denna dag';
       return;
     }
 
     scheduleEmpty.classList.add('hidden');
 
-    if (isToday) {
-      updateTimeEstimate();
-      // Compute timeline start times for each group
-      var dayStart = getDayStartMinutes();
-      var cumMin = dayStart;
-      var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-      var nowInserted = false;
+    // Read-only history view — grouped
+    scheduleList.innerHTML = groups.map(function (group) {
+      var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
+      var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+      var isDone = group.completed >= group.total;
 
-      // Editable today view — grouped by task
-      var html = '';
-      groups.forEach(function (group, gIdx) {
-        var groupEndMin = cumMin + group.total * WORK_MINUTES + (group.total - 1) * BREAK_MINUTES;
-
-        // Insert "now" line before this group if appropriate
-        if (!nowInserted && nowMin < groupEndMin && nowMin >= dayStart) {
-          if (nowMin >= cumMin || gIdx === 0) {
-            html += '<div class="timeline-now"></div>';
-            nowInserted = true;
-          }
-        }
-
-        var timeLabel = formatMinutesAsTime(cumMin);
-
-        // Empty slot
-        if (!group.taskId) {
-          html += '<div class="schedule-item schedule-empty-slot" data-gidx="' + gIdx + '" data-flat-idx="' + group.flatIdx + '">' +
-            '<span class="schedule-time-label">' + timeLabel + '</span>' +
-            '<span class="schedule-empty-label">Ledig</span>' +
-            '<button class="btn-remove-empty-slot btn-tiny" data-flat-idx="' + group.flatIdx + '">&times;</button>' +
-            '</div>';
-          cumMin = groupEndMin + BREAK_MINUTES;
-          return;
-        }
-
-        var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
-        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-        var isDone = group.completed >= group.total;
-        var color = getProjectColor(project);
-
-        var recurring = task && task.recurring;
-        var recurBadge = recurring ? '<span class="recurring-badge">' + (recurring === 'daily' ? 'daglig' : 'veckovis') + '</span>' : '';
-        var playBtn = isDone ? '' : '<button class="btn-play-task" data-task-id="' + group.taskId + '" title="Starta">&#9654;</button>';
-
-        html += '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + '">' +
-          '<span class="schedule-time-label">' + timeLabel + '</span>' +
-          '<span class="schedule-drag-handle">&#9776;</span>' +
-          '<div class="schedule-item-body">' +
-          '<div class="schedule-item-info">' +
-          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + recurBadge + '</span>' +
-          '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
-          '</div>' +
-          '</div>' +
-          '<div class="schedule-item-controls">' +
-          playBtn +
-          '<button class="btn-pom-minus btn-tiny" data-task-id="' + group.taskId + '">&minus;</button>' +
-          '<span class="schedule-pom-count">' + group.completed + '/' + group.total + '</span>' +
-          '<button class="btn-pom-plus btn-tiny" data-task-id="' + group.taskId + '">+</button>' +
-          '<button class="btn-remove-schedule btn-tiny" data-task-id="' + group.taskId + '">&times;</button>' +
-          '</div>' +
-          '</div>';
-
-        cumMin = groupEndMin + BREAK_MINUTES; // break between groups
-      });
-
-      // Insert "now" line at end if not yet inserted
-      if (!nowInserted && nowMin >= dayStart) {
-        html += '<div class="timeline-now"></div>';
-      }
-
-      scheduleList.innerHTML = html;
-
-      // Event listeners
-      scheduleList.querySelectorAll('.btn-pom-minus').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          changePomCount(btn.dataset.taskId, -1);
-        });
-      });
-      scheduleList.querySelectorAll('.btn-pom-plus').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          changePomCount(btn.dataset.taskId, 1);
-        });
-      });
-      scheduleList.querySelectorAll('.btn-remove-schedule').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          removeScheduleItem(btn.dataset.taskId);
-        });
-      });
-      scheduleList.querySelectorAll('.btn-play-task').forEach(function (btn) {
-        btn.addEventListener('click', function (e) {
-          e.stopPropagation();
-          playTask(btn.dataset.taskId);
-        });
-      });
-      scheduleList.querySelectorAll('.btn-remove-empty-slot').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var schedule = getSchedule();
-          var fi = parseInt(btn.dataset.flatIdx);
-          if (fi < schedule.items.length && !schedule.items[fi].taskId) {
-            schedule.items.splice(fi, 1);
-            saveSchedule(schedule);
-            renderPlanView();
-            updateTaskBanner();
-          }
-        });
-      });
-
-      // Whole schedule items are draggable (skip empty slots)
-      scheduleList.querySelectorAll('.schedule-item:not(.schedule-empty-slot)').forEach(function (item) {
-        initScheduleDrag(item);
-      });
-    } else {
-      // Read-only history view — grouped
-      scheduleList.innerHTML = groups.map(function (group) {
-        var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
-        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-        var isDone = group.completed >= group.total;
-
-        var color = getProjectColor(project);
-        return '<div class="schedule-item history-item' + (isDone ? ' done' : '') + '" style="border-left:4px solid ' + color + '">' +
-          '<div class="schedule-item-body">' +
-          '<div class="schedule-item-info">' +
-          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + '</span>' +
-          '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
-          '</div>' +
-          '</div>' +
-          '<span class="schedule-pom-count">' + group.completed + '/' + group.total + '</span>' +
-          '</div>';
-      }).join('');
-
-      // Summary
-      var totalCompleted = 0, totalPomodoros = 0;
-      for (var i = 0; i < groups.length; i++) {
-        totalCompleted += groups[i].completed;
-        totalPomodoros += groups[i].total;
-      }
-      scheduleList.innerHTML += '<div class="schedule-history-summary">' +
-        totalCompleted + '/' + totalPomodoros + ' pomodoros avklarade' +
+      var color = getProjectColor(project);
+      return '<div class="schedule-item history-item' + (isDone ? ' done' : '') + '" style="border-left:4px solid ' + color + '">' +
+        '<div class="schedule-item-body">' +
+        '<div class="schedule-item-info">' +
+        '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + '</span>' +
+        '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
+        '</div>' +
+        '</div>' +
+        '<span class="schedule-pom-count">' + group.completed + '/' + group.total + '</span>' +
         '</div>';
+    }).join('');
+
+    // Summary
+    var totalCompleted = 0, totalPomodoros = 0;
+    for (var i = 0; i < groups.length; i++) {
+      totalCompleted += groups[i].completed;
+      totalPomodoros += groups[i].total;
     }
+    scheduleList.innerHTML += '<div class="schedule-history-summary">' +
+      totalCompleted + '/' + totalPomodoros + ' pomodoros avklarade' +
+      '</div>';
   }
 
   function changePomCount(taskId, delta) {
@@ -1406,19 +1383,26 @@
 
   function removeScheduleItem(taskId) {
     var schedule = getSchedule();
-    schedule.items = schedule.items.filter(function (item) { return item.taskId !== taskId; });
+    // Clear slots with this taskId (set to empty rather than splice)
+    for (var i = 0; i < schedule.items.length; i++) {
+      if (schedule.items[i].taskId === taskId) {
+        schedule.items[i] = { taskId: null, done: false };
+      }
+    }
     saveSchedule(schedule);
     renderPlanView();
   }
 
   // --- Schedule picker ---
   btnAddToSchedule.addEventListener('click', function () {
+    pickerTargetSlotIdx = -1;
     renderSchedulePicker();
     scheduleModal.classList.remove('hidden');
   });
 
   btnClosePicker.addEventListener('click', function () {
     scheduleModal.classList.add('hidden');
+    pickerTargetSlotIdx = -1;
     renderSchedule();
   });
 
@@ -1454,19 +1438,47 @@
 
     schedulePicker.querySelectorAll('.picker-task:not(.added)').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        addToSchedule(btn.dataset.taskId);
-        renderSchedulePicker();
+        addToSchedule(btn.dataset.taskId, pickerTargetSlotIdx);
+        // If we targeted a specific slot, close picker after placing
+        if (pickerTargetSlotIdx >= 0) {
+          scheduleModal.classList.add('hidden');
+          pickerTargetSlotIdx = -1;
+          renderPlanView();
+          updateTaskBanner();
+        } else {
+          renderSchedulePicker();
+        }
       });
     });
   }
 
-  function addToSchedule(taskId) {
+  function addToSchedule(taskId, targetSlotIdx) {
     var schedule = getSchedule();
-    // Don't add duplicates
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (schedule.items[i].taskId === taskId) return;
+    var slotCount = getSlotCount();
+
+    // Ensure array is big enough
+    while (schedule.items.length < slotCount) {
+      schedule.items.push({ taskId: null, done: false });
     }
-    schedule.items.push({ taskId: taskId, done: false });
+
+    if (targetSlotIdx >= 0 && targetSlotIdx < schedule.items.length) {
+      // Place into specific slot
+      schedule.items[targetSlotIdx] = { taskId: taskId, done: false };
+    } else {
+      // Find first empty slot
+      var placed = false;
+      for (var i = 0; i < schedule.items.length; i++) {
+        if (!schedule.items[i].taskId) {
+          schedule.items[i] = { taskId: taskId, done: false };
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        // All slots full, append
+        schedule.items.push({ taskId: taskId, done: false });
+      }
+    }
     saveSchedule(schedule);
   }
 
@@ -1630,9 +1642,11 @@
       drag.sourceEl = null;
     }
     scheduleList.classList.remove('drop-active');
-    // Remove any placeholders
-    var phs = document.querySelectorAll('.schedule-drop-placeholder, .ts-drop-placeholder');
-    phs.forEach(function (p) { p.remove(); });
+    // Remove any placeholders and drop targets
+    var phs = document.querySelectorAll('.schedule-drop-placeholder, .ts-drop-placeholder, .drop-target');
+    phs.forEach(function (p) { p.classList ? p.classList.remove('drop-target') : p.remove(); });
+    var phs2 = document.querySelectorAll('.schedule-drop-placeholder, .ts-drop-placeholder');
+    phs2.forEach(function (p) { p.remove(); });
     drag.active = false;
     drag.started = false;
     drag.type = null;
@@ -1666,7 +1680,7 @@
     });
   }
 
-  // --- Schedule drag (reorder by task group) ---
+  // --- Schedule drag (reorder by task group) - legacy, kept for history view ---
   function initScheduleDrag(item) {
     var taskId = item.dataset.taskId;
 
@@ -1688,6 +1702,35 @@
     }, { passive: true });
 
     item.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      onStart(e.clientX, e.clientY, e);
+    });
+  }
+
+  // --- Slot drag (drag filled slot within time grid) ---
+  function initSlotDrag(cell) {
+    var slotIdx = parseInt(cell.dataset.slotIdx);
+    var taskId = cell.dataset.taskId;
+
+    function onStart(clientX, clientY, e) {
+      if (e.target.closest('.btn-tiny')) return;
+      drag.active = true;
+      drag.started = false;
+      drag.type = 'slot-reorder';
+      drag.taskId = taskId;
+      drag.sourceIdx = slotIdx;
+      drag.sourceEl = cell;
+      drag.startX = clientX;
+      drag.startY = clientY;
+    }
+
+    cell.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) return;
+      var t = e.touches[0];
+      onStart(t.clientX, t.clientY, e);
+    }, { passive: true });
+
+    cell.addEventListener('mousedown', function (e) {
       if (e.button !== 0) return;
       onStart(e.clientX, e.clientY, e);
     });
@@ -1715,6 +1758,9 @@
         drag.ghost = createGhost(task ? task.name : '', color);
         scheduleList.classList.add('drop-active');
         scheduleEmpty.classList.add('hidden');
+      } else if (drag.type === 'slot-reorder') {
+        var slotName = drag.sourceEl.querySelector('.timeslot-task-name');
+        drag.ghost = createGhost(slotName ? slotName.textContent : '', null);
       } else if (drag.type === 'schedule-reorder') {
         var taskText = drag.sourceEl.querySelector('.schedule-task');
         drag.ghost = createGhost(taskText ? taskText.textContent : '', null);
@@ -1730,10 +1776,29 @@
     drag.ghost.style.left = (clientX + 12) + 'px';
     drag.ghost.style.top = (clientY - 20) + 'px';
 
-    if (drag.type === 'schedule-reorder') {
+    // Highlight target slot when dragging over the time grid
+    if (drag.type === 'task-to-schedule' || drag.type === 'slot-reorder') {
+      updateSlotDropTarget(clientX, clientY);
+    } else if (drag.type === 'schedule-reorder') {
       updateReorderPlaceholder(clientY, scheduleList, '.schedule-item', 'schedule-drop-placeholder');
     } else if (drag.type === 'timer-reorder') {
       updateReorderPlaceholder(clientY, timerSchedule, '.ts-item', 'ts-drop-placeholder');
+    }
+  }
+
+  function updateSlotDropTarget(clientX, clientY) {
+    // Remove previous highlight
+    var prev = scheduleList.querySelectorAll('.drop-target');
+    prev.forEach(function (el) { el.classList.remove('drop-target'); });
+
+    // Find which slot cell the cursor is over
+    var cells = scheduleList.querySelectorAll('.timeslot-cell');
+    for (var i = 0; i < cells.length; i++) {
+      var rect = cells[i].getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom && clientX >= rect.left && clientX <= rect.right) {
+        cells[i].classList.add('drop-target');
+        break;
+      }
     }
   }
 
@@ -1762,22 +1827,59 @@
     }
   }
 
+  // Find which slot index the cursor is over
+  function getSlotIdxAtPoint(clientX, clientY) {
+    var cells = scheduleList.querySelectorAll('.timeslot-cell');
+    for (var i = 0; i < cells.length; i++) {
+      var rect = cells[i].getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom && clientX >= rect.left && clientX <= rect.right) {
+        return parseInt(cells[i].dataset.slotIdx);
+      }
+    }
+    return -1;
+  }
+
   // --- Global end handler ---
   function onDragEnd(clientX, clientY) {
     if (!drag.active) return;
 
+    // Clear drop-target highlights
+    var targets = scheduleList.querySelectorAll('.drop-target');
+    targets.forEach(function (el) { el.classList.remove('drop-target'); });
+
     if (drag.started) {
       if (drag.type === 'task-to-schedule') {
-        // Check if dropped over schedule area
-        var scheduleRect = document.getElementById('schedule-section').getBoundingClientRect();
-        var overSchedule = clientY >= scheduleRect.top - 40 && clientY <= scheduleRect.bottom + 40;
-        if (overSchedule) {
-          addToSchedule(drag.taskId);
+        // Check if dropped over a specific slot
+        var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
+        if (targetSlotIdx >= 0) {
+          addToSchedule(drag.taskId, targetSlotIdx);
           renderSchedule();
           renderProjects();
+        } else {
+          // Check if dropped over schedule area generally
+          var scheduleRect = document.getElementById('schedule-section').getBoundingClientRect();
+          var overSchedule = clientY >= scheduleRect.top - 40 && clientY <= scheduleRect.bottom + 40;
+          if (overSchedule) {
+            addToSchedule(drag.taskId, -1);
+            renderSchedule();
+            renderProjects();
+          }
         }
+      } else if (drag.type === 'slot-reorder') {
+        // Move slot content to target slot
+        var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
+        if (targetSlotIdx >= 0 && targetSlotIdx !== drag.sourceIdx) {
+          var schedule = getSchedule();
+          var movedItem = schedule.items[drag.sourceIdx];
+          // Swap: put current target content into source slot
+          schedule.items[drag.sourceIdx] = schedule.items[targetSlotIdx];
+          schedule.items[targetSlotIdx] = movedItem;
+          saveSchedule(schedule);
+        }
+        renderSchedule();
+        updateTaskBanner();
       } else if (drag.type === 'schedule-reorder') {
-        // Group-based reorder in plan view
+        // Group-based reorder in plan view (for history)
         var ph = scheduleList.querySelector('.schedule-drop-placeholder');
         var newGroupIdx = 0;
         if (ph) {
@@ -1818,10 +1920,12 @@
     } else if (drag.taskId) {
       // Wasn't a drag (no movement)
       if (drag.type === 'task-to-schedule') {
-        // Tap on task in plan view → add to schedule
-        addToSchedule(drag.taskId);
+        // Tap on task in plan view → add to first empty slot
+        addToSchedule(drag.taskId, -1);
         renderSchedule();
         renderProjects();
+      } else if (drag.type === 'slot-reorder') {
+        openTaskDetail(drag.taskId);
       } else if (drag.type === 'timer-reorder') {
         openTaskDetail(drag.taskId, drag.sourceIdx);
       } else {
@@ -1939,10 +2043,8 @@
     tasks.push({ id: taskId, projectId: projectId, name: name });
     saveTasks(tasks);
 
-    // Add to schedule
-    var schedule = getSchedule();
-    schedule.items.push({ taskId: taskId, done: false });
-    saveSchedule(schedule);
+    // Add to first empty slot
+    addToSchedule(taskId, -1);
 
     quickAddModal.classList.add('hidden');
     updateTaskBanner();
@@ -2157,21 +2259,42 @@
   }
 
   // ========================================
-  // Day start time & time estimate
+  // Day start/end time & time estimate
   // ========================================
   var dayStartTimeInput = document.getElementById('day-start-time');
+  var dayEndTimeInput = document.getElementById('day-end-time');
   var scheduleTimeEstimate = document.getElementById('schedule-time-estimate');
 
-  dayStartTimeInput.value = localStorage.getItem('pomodoro_day_start') || '09:00';
+  dayStartTimeInput.value = localStorage.getItem('pomodoro_day_start') || '08:00';
+  dayEndTimeInput.value = localStorage.getItem('pomodoro_day_end') || '17:00';
+
   dayStartTimeInput.addEventListener('change', function () {
     localStorage.setItem('pomodoro_day_start', dayStartTimeInput.value);
     renderSchedule();
   });
 
+  dayEndTimeInput.addEventListener('change', function () {
+    localStorage.setItem('pomodoro_day_end', dayEndTimeInput.value);
+    renderSchedule();
+  });
+
   function getDayStartMinutes() {
-    var val = dayStartTimeInput.value || '09:00';
+    var val = dayStartTimeInput.value || '08:00';
     var parts = val.split(':');
     return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  }
+
+  function getDayEndMinutes() {
+    var val = dayEndTimeInput.value || '17:00';
+    var parts = val.split(':');
+    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
+  }
+
+  function getSlotCount() {
+    var start = getDayStartMinutes();
+    var end = getDayEndMinutes();
+    if (end <= start) end = start + 60; // at least 1 hour
+    return Math.floor((end - start) / 30);
   }
 
   function formatMinutesAsTime(totalMin) {
@@ -2182,17 +2305,22 @@
 
   function updateTimeEstimate() {
     var schedule = getSchedule();
-    var totalPoms = schedule.items.length;
-    if (totalPoms === 0) {
+    var filledCount = 0;
+    for (var i = 0; i < schedule.items.length; i++) {
+      if (schedule.items[i].taskId) filledCount++;
+    }
+    var slotCount = getSlotCount();
+    if (filledCount === 0) {
       scheduleTimeEstimate.textContent = '';
       return;
     }
-    var totalMin = totalPoms * WORK_MINUTES + (totalPoms - 1) * BREAK_MINUTES;
+    var totalMin = filledCount * 30;
     var h = Math.floor(totalMin / 60);
     var m = totalMin % 60;
-    var str = '~';
+    var str = '';
     if (h > 0) str += h + 'h ';
-    str += m + 'min planerat';
+    if (m > 0) str += m + 'min';
+    str += ' planerat (' + filledCount + '/' + slotCount + ')';
     scheduleTimeEstimate.textContent = str;
   }
 
@@ -2204,31 +2332,26 @@
   function autoAddRecurringTasks() {
     var tasks = getTasks();
     var schedule = getSchedule();
-    var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
+    var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; }).filter(Boolean);
     var today = new Date();
     var dayOfWeek = today.getDay(); // 0=sun
 
-    var changed = false;
     for (var i = 0; i < tasks.length; i++) {
       var t = tasks[i];
       if (!t.recurring) continue;
       if (scheduledTaskIds.indexOf(t.id) !== -1) continue;
 
       if (t.recurring === 'daily') {
-        schedule.items.push({ taskId: t.id, done: false });
+        addToSchedule(t.id, -1);
         scheduledTaskIds.push(t.id);
-        changed = true;
       } else if (t.recurring === 'weekly') {
-        // Add on same weekday as creation, default monday (1)
         var recurDay = t.recurDay != null ? t.recurDay : 1;
         if (dayOfWeek === recurDay) {
-          schedule.items.push({ taskId: t.id, done: false });
+          addToSchedule(t.id, -1);
           scheduledTaskIds.push(t.id);
-          changed = true;
         }
       }
     }
-    if (changed) saveSchedule(schedule);
   }
 
   // ========================================
@@ -2361,13 +2484,13 @@
         }, 250);
         return;
       } else if (dx < -threshold) {
-        // Swipe left → remove
+        // Swipe left → clear slot
         haptic(15);
         el.classList.add('swipe-away-left');
         setTimeout(function () {
           var schedule = getSchedule();
           if (idx < schedule.items.length) {
-            schedule.items.splice(idx, 1);
+            schedule.items[idx] = { taskId: null, done: false };
             saveSchedule(schedule);
             updateTaskBanner();
           }
@@ -2400,30 +2523,7 @@
       }
     }
     if (!found) {
-      schedule.items.push({ taskId: taskId, done: false });
-      saveSchedule(schedule);
-    }
-
-    // Reorder so this task's first undone item is at the front of undone items
-    schedule = getSchedule();
-    var firstUndone = -1;
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (!schedule.items[i].done) {
-        firstUndone = i;
-        break;
-      }
-    }
-    var targetIdx = -1;
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (schedule.items[i].taskId === taskId && !schedule.items[i].done) {
-        targetIdx = i;
-        break;
-      }
-    }
-    if (targetIdx > firstUndone) {
-      var item = schedule.items.splice(targetIdx, 1)[0];
-      schedule.items.splice(firstUndone, 0, item);
-      saveSchedule(schedule);
+      addToSchedule(taskId, -1);
     }
 
     // Switch to timer view and start

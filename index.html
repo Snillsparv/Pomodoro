@@ -72,7 +72,11 @@
         </div>
         <div id="schedule-time-bar">
           <span id="schedule-time-estimate"></span>
-          <label class="start-time-label">Start <input type="time" id="day-start-time" value="09:00"></label>
+          <div class="time-range-inputs">
+            <label class="start-time-label"><input type="time" id="day-start-time" value="08:00"></label>
+            <span class="time-range-sep">&ndash;</span>
+            <label class="start-time-label"><input type="time" id="day-end-time" value="17:00"></label>
+          </div>
         </div>
         <div id="carryover-banner" class="carryover-banner hidden">
           <div class="carryover-text">

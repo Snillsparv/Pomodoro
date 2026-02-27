@@ -1439,7 +1439,8 @@ body.light-theme .btn-theme-toggle::after {
   gap: 6px;
 }
 
-#day-start-time {
+#day-start-time,
+#day-end-time {
   padding: 4px 8px;
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -1447,7 +1448,18 @@ body.light-theme .btn-theme-toggle::after {
   color: var(--text-secondary);
   font-size: 13px;
   outline: none;
-  width: 90px;
+  width: 80px;
+}
+
+.time-range-inputs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.time-range-sep {
+  color: var(--text-muted);
+  font-size: 14px;
 }
 
 /* Timeline time labels on schedule items */
@@ -1478,6 +1490,187 @@ body.light-theme .btn-theme-toggle::after {
   color: var(--accent);
   font-weight: 700;
   text-transform: uppercase;
+}
+
+/* ========================================
+   Time slot grid (Plan view)
+   ======================================== */
+.timeslot-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.timeslot-row {
+  display: flex;
+  align-items: stretch;
+  min-height: 44px;
+  border-bottom: 1px solid rgba(15, 52, 96, 0.5);
+  position: relative;
+}
+
+.timeslot-row:last-child {
+  border-bottom: none;
+}
+
+/* Hour rows get a stronger border */
+.timeslot-row.hour-start {
+  border-top: 1px solid var(--border-color);
+}
+
+.timeslot-row:first-child {
+  border-top: none;
+}
+
+.timeslot-time {
+  width: 48px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  padding: 4px 6px 0 0;
+  text-align: right;
+  line-height: 1;
+}
+
+/* Only show time label on hour starts */
+.timeslot-row:not(.hour-start) .timeslot-time {
+  color: transparent;
+}
+
+.timeslot-row:not(.hour-start) .timeslot-time::after {
+  content: '';
+}
+
+/* Half-hour shows dimmer time */
+.timeslot-row.half-hour .timeslot-time {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.timeslot-cell {
+  flex: 1;
+  min-height: 42px;
+  border-radius: 8px;
+  margin: 2px 0;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s, box-shadow 0.15s;
+  position: relative;
+}
+
+/* Empty slot */
+.timeslot-cell.empty {
+  background: rgba(15, 52, 96, 0.18);
+  border: 1.5px dashed rgba(15, 52, 96, 0.4);
+}
+
+.timeslot-cell.empty:hover {
+  background: rgba(15, 52, 96, 0.35);
+  border-color: var(--teal);
+}
+
+.timeslot-cell.empty:active {
+  transform: scale(0.98);
+  background: rgba(83, 168, 182, 0.15);
+  border-color: var(--teal);
+}
+
+.timeslot-cell.empty .timeslot-placeholder {
+  font-size: 13px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+/* Filled slot */
+.timeslot-cell.filled {
+  background: var(--bg-card);
+  border: none;
+  cursor: grab;
+  touch-action: none;
+}
+
+.timeslot-cell.filled:active:not(.dragging) {
+  transform: scale(0.98);
+}
+
+.timeslot-cell.filled.dragging {
+  opacity: 0.2;
+  transform: scale(0.95);
+}
+
+.timeslot-cell.filled.done {
+  opacity: 0.4;
+}
+
+.timeslot-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.timeslot-task-name {
+  flex: 1;
+  font-size: 14px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.timeslot-cell.done .timeslot-task-name {
+  text-decoration: line-through;
+  color: var(--text-muted);
+}
+
+.timeslot-project-name {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+}
+
+.timeslot-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* Drop target highlight when dragging over a slot */
+.timeslot-cell.drop-target {
+  background: rgba(83, 168, 182, 0.2) !important;
+  border: 2px solid var(--teal) !important;
+  box-shadow: 0 0 12px rgba(83, 168, 182, 0.15);
+}
+
+/* Now indicator in grid */
+.timeslot-now-line {
+  position: absolute;
+  left: 48px;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.timeslot-now-line::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 /* ========================================
