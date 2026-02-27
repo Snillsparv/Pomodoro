@@ -304,41 +304,36 @@
     var schedule = getSchedule();
     var tasks = getTasks();
     var projects = getProjects();
+    var slotCount = getSlotCount();
+    var dayStart = getDayStartMinutes();
+    var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
 
-    // Filter to only items with tasks (skip empty slots for timer view)
-    var timerItems = [];
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (schedule.items[i].taskId) {
-        timerItems.push({ item: schedule.items[i], origIdx: i });
-      }
+    // Ensure schedule items array matches slot count
+    while (schedule.items.length < slotCount) {
+      schedule.items.push({ taskId: null, done: false });
     }
 
-    if (timerItems.length === 0) {
+    if (slotCount === 0) {
       timerSchedule.innerHTML = '';
       return;
     }
 
-    // Find current (first not-done) index
+    // Find current (first not-done filled) index
     var currentIdx = -1;
-    for (var i = 0; i < timerItems.length; i++) {
-      if (!timerItems[i].item.done) {
+    for (var i = 0; i < slotCount; i++) {
+      if (schedule.items[i].taskId && !schedule.items[i].done) {
         currentIdx = i;
         break;
       }
     }
 
-    // Compute per-slot start times based on grid position
-    var dayStart = getDayStartMinutes();
-    var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
     var nowInserted = false;
     var html = '';
 
-    timerItems.forEach(function (entry, idx) {
-      var item = entry.item;
-      var slotStart = dayStart + entry.origIdx * 30;
-      var slotEnd = slotStart + WORK_MINUTES;
-
-      var origIdx = entry.origIdx;
+    for (var i = 0; i < slotCount; i++) {
+      var item = schedule.items[i];
+      var slotStart = dayStart + i * 30;
+      var slotEnd = slotStart + 30;
 
       // Insert "now" line before this slot if current time falls here
       if (!nowInserted && nowMin < slotEnd && nowMin >= dayStart) {
@@ -348,45 +343,55 @@
 
       var timeLabel = formatMinutesAsTime(slotStart);
 
-      var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
-      var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-      var color = getProjectColor(project);
-      var isPast = nowMin >= slotEnd;
+      if (item.taskId) {
+        // Filled slot
+        var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
+        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+        var color = getProjectColor(project);
+        var isPast = nowMin >= slotEnd;
+        var taskName = task ? task.name : 'Borttagen';
 
-      var cls = 'ts-item';
-      if (item.done) cls += ' ts-done';
-      else if (idx === currentIdx) cls += ' ts-current';
-      else if (isPast) cls += ' ts-past';
-      else cls += ' ts-upcoming';
+        var cls = 'ts-item';
+        if (item.done) cls += ' ts-done';
+        else if (i === currentIdx) cls += ' ts-current';
+        else if (isPast) cls += ' ts-past';
+        else cls += ' ts-upcoming';
 
-      var indicator = item.done
-        ? '<span class="ts-check">&check;</span>'
-        : '<span class="ts-dot" style="background:' + color + '"></span>';
+        var indicator = item.done
+          ? '<span class="ts-check">&check;</span>'
+          : '<span class="ts-dot" style="background:' + color + '"></span>';
 
-      var taskName = task ? task.name : 'Borttagen';
-
-      // Action buttons for undone items
-      var pastBtns = '';
-      if (!item.done) {
-        if (isPast) {
-          pastBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + origIdx + '" title="Markera klar">&check;</button>' +
-            '<button class="ts-mark-remove btn-tiny" data-idx="' + origIdx + '" title="Ta bort">&times;</button>';
-        } else {
-          pastBtns = '<button class="ts-mark-remove btn-tiny" data-idx="' + origIdx + '" title="Ta bort">&times;</button>';
+        var pastBtns = '';
+        if (!item.done) {
+          if (isPast) {
+            pastBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + i + '" title="Markera klar">&check;</button>' +
+              '<button class="ts-mark-remove btn-tiny" data-idx="' + i + '" title="Ta bort">&times;</button>';
+          } else {
+            pastBtns = '<button class="ts-mark-remove btn-tiny" data-idx="' + i + '" title="Ta bort">&times;</button>';
+          }
         }
-      }
 
-      html += '<div class="' + cls + '" data-idx="' + origIdx + '" data-task-id="' + (item.taskId || '') + '">' +
-        '<div class="ts-item-bg bg-done">Klar</div>' +
-        '<div class="ts-item-bg bg-remove">Ta bort</div>' +
-        '<div class="ts-item-inner">' +
-        '<span class="ts-time">' + timeLabel + '</span>' +
-        indicator +
-        '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
-        pastBtns +
-        '</div>' +
-        '</div>';
-    });
+        html += '<div class="' + cls + '" data-idx="' + i + '" data-task-id="' + item.taskId + '">' +
+          '<div class="ts-item-bg bg-done">Klar</div>' +
+          '<div class="ts-item-bg bg-remove">Ta bort</div>' +
+          '<div class="ts-item-inner">' +
+          '<span class="ts-time">' + timeLabel + '</span>' +
+          indicator +
+          '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
+          pastBtns +
+          '</div>' +
+          '</div>';
+      } else {
+        // Empty slot
+        html += '<div class="ts-item ts-empty" data-idx="' + i + '">' +
+          '<div class="ts-item-inner">' +
+          '<span class="ts-time">' + timeLabel + '</span>' +
+          '<span class="ts-dot-empty"></span>' +
+          '<span class="ts-name-empty">Ledig</span>' +
+          '</div>' +
+          '</div>';
+      }
+    }
 
     // "Now" line at end if not yet placed
     if (!nowInserted && nowMin >= dayStart) {
@@ -401,9 +406,9 @@
         e.stopPropagation();
         haptic(12);
         var schedule = getSchedule();
-        var i = parseInt(btn.dataset.idx);
-        if (i < schedule.items.length) {
-          schedule.items[i].done = true;
+        var idx = parseInt(btn.dataset.idx);
+        if (idx < schedule.items.length) {
+          schedule.items[idx].done = true;
           saveSchedule(schedule);
           updateTaskBanner();
           checkAllDoneConfetti();
@@ -417,16 +422,16 @@
         e.stopPropagation();
         haptic(12);
         var schedule = getSchedule();
-        var i = parseInt(btn.dataset.idx);
-        if (i < schedule.items.length) {
-          schedule.items[i] = { taskId: null, done: false };
+        var idx = parseInt(btn.dataset.idx);
+        if (idx < schedule.items.length) {
+          schedule.items[idx] = { taskId: null, done: false };
           saveSchedule(schedule);
           updateTaskBanner();
         }
       });
     });
 
-    // Timer schedule drag reorder + swipe gestures
+    // Timer schedule drag reorder + swipe gestures (only filled slots)
     timerSchedule.querySelectorAll('.ts-item:not(.ts-empty)').forEach(function (el) {
       initTimerScheduleDrag(el);
       if (!el.classList.contains('ts-done')) {
@@ -1825,14 +1830,12 @@
     drag.ghost.style.top = (clientY - 20) + 'px';
 
     // Highlight target slot when dragging over the time grid
-    if (drag.type === 'task-to-schedule') {
+    if (drag.type === 'task-to-schedule' || drag.type === 'slot-reorder') {
       updateSlotDropTarget(clientX, clientY);
-    } else if (drag.type === 'slot-reorder') {
-      updateSlotInsertIndicator(clientY);
     } else if (drag.type === 'schedule-reorder') {
       updateReorderPlaceholder(clientY, scheduleList, '.schedule-item', 'schedule-drop-placeholder');
     } else if (drag.type === 'timer-reorder') {
-      updateReorderPlaceholder(clientY, timerSchedule, '.ts-item', 'ts-drop-placeholder');
+      updateTimerDropTarget(clientX, clientY);
     }
   }
 
@@ -1850,6 +1853,31 @@
         break;
       }
     }
+  }
+
+  function updateTimerDropTarget(clientX, clientY) {
+    var prev = timerSchedule.querySelectorAll('.drop-target');
+    prev.forEach(function (el) { el.classList.remove('drop-target'); });
+
+    var items = timerSchedule.querySelectorAll('.ts-item');
+    for (var i = 0; i < items.length; i++) {
+      var rect = items[i].getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom && clientX >= rect.left && clientX <= rect.right) {
+        items[i].classList.add('drop-target');
+        break;
+      }
+    }
+  }
+
+  function getTimerSlotIdxAtPoint(clientX, clientY) {
+    var items = timerSchedule.querySelectorAll('.ts-item');
+    for (var i = 0; i < items.length; i++) {
+      var rect = items[i].getBoundingClientRect();
+      if (clientY >= rect.top && clientY <= rect.bottom && clientX >= rect.left && clientX <= rect.right) {
+        return parseInt(items[i].dataset.idx);
+      }
+    }
+    return -1;
   }
 
   function updateSlotInsertIndicator(clientY) {
@@ -1920,7 +1948,7 @@
     if (!drag.active) return;
 
     // Clear drop-target highlights
-    var targets = scheduleList.querySelectorAll('.drop-target');
+    var targets = document.querySelectorAll('.drop-target');
     targets.forEach(function (el) { el.classList.remove('drop-target'); });
 
     if (drag.started) {
@@ -1942,28 +1970,19 @@
           }
         }
       } else if (drag.type === 'slot-reorder') {
-        // Insert: remove from source and insert at target position
-        var indicator = scheduleList.querySelector('.slot-insert-indicator');
-        var targetIdx = drag.sourceIdx; // default: no move
-        if (indicator) {
-          var grid = scheduleList.querySelector('.timeslot-grid');
-          var rows = grid.querySelectorAll('.timeslot-row');
-          var count = 0;
-          var sibling = grid.firstChild;
-          while (sibling) {
-            if (sibling === indicator) break;
-            if (sibling.classList && sibling.classList.contains('timeslot-row')) count++;
-            sibling = sibling.nextSibling;
+        // Shift-move: take item out and shift items in between
+        var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
+        if (targetSlotIdx >= 0 && targetSlotIdx !== drag.sourceIdx) {
+          var schedule = getSchedule();
+          var from = drag.sourceIdx;
+          var to = targetSlotIdx;
+          var movedItem = schedule.items[from];
+          if (from < to) {
+            for (var i = from; i < to; i++) schedule.items[i] = schedule.items[i + 1];
+          } else {
+            for (var i = from; i > to; i--) schedule.items[i] = schedule.items[i - 1];
           }
-          targetIdx = count;
-        }
-        var schedule = getSchedule();
-        var fromIdx = drag.sourceIdx;
-        // Adjust target: if dropping below source, account for removal shift
-        if (targetIdx > fromIdx) targetIdx--;
-        if (fromIdx !== targetIdx) {
-          var movedItem = schedule.items.splice(fromIdx, 1)[0];
-          schedule.items.splice(targetIdx, 0, movedItem);
+          schedule.items[to] = movedItem;
           saveSchedule(schedule);
         }
         renderSchedule();
@@ -1984,25 +2003,19 @@
         }
         reorderScheduleGroups(drag.taskId, newGroupIdx);
       } else if (drag.type === 'timer-reorder') {
-        // Individual item reorder — leave empty slot behind
-        var ph = timerSchedule.querySelector('.ts-drop-placeholder');
-        var newIdx = 0;
-        if (ph) {
-          var sibling = timerSchedule.firstChild;
-          var count = 0;
-          while (sibling) {
-            if (sibling === ph) break;
-            if (sibling.classList && sibling.classList.contains('ts-item')) count++;
-            sibling = sibling.nextSibling;
+        // Shift-move within timer schedule
+        var targetIdx = getTimerSlotIdxAtPoint(clientX, clientY);
+        if (targetIdx >= 0 && targetIdx !== drag.sourceIdx) {
+          var schedule = getSchedule();
+          var from = drag.sourceIdx;
+          var to = targetIdx;
+          var movedItem = schedule.items[from];
+          if (from < to) {
+            for (var i = from; i < to; i++) schedule.items[i] = schedule.items[i + 1];
+          } else {
+            for (var i = from; i > to; i--) schedule.items[i] = schedule.items[i - 1];
           }
-          newIdx = count;
-        }
-        var schedule = getSchedule();
-        var fromIdx = drag.sourceIdx;
-        if (fromIdx !== newIdx && fromIdx !== newIdx - 1) {
-          var movedItem = schedule.items[fromIdx];
-          schedule.items[fromIdx] = { taskId: null, done: false };
-          schedule.items.splice(newIdx, 0, movedItem);
+          schedule.items[to] = movedItem;
           saveSchedule(schedule);
         }
         updateTaskBanner();

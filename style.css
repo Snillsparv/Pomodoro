@@ -376,6 +376,13 @@ body.light-theme .btn-theme-toggle::after {
   font-size: 14px;
 }
 
+.ts-item.drop-target {
+  background: rgba(83, 168, 182, 0.2);
+  outline: 2px solid var(--teal);
+  outline-offset: -2px;
+  border-radius: 12px;
+}
+
 .ts-drop-placeholder {
   height: 3px;
   background: #53a8b6;
