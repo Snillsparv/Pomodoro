@@ -440,6 +440,16 @@
       });
     });
 
+    // Click on empty slot → open picker for that slot
+    timerSchedule.querySelectorAll('.ts-item.ts-empty').forEach(function (el) {
+      el.addEventListener('click', function () {
+        pickerTargetSlotIdx = parseInt(el.dataset.idx);
+        renderSchedulePicker();
+        scheduleModal.classList.remove('hidden');
+        pickerNewName.focus();
+      });
+    });
+
     // Timer schedule drag reorder + swipe gestures (only filled slots)
     timerSchedule.querySelectorAll('.ts-item:not(.ts-empty)').forEach(function (el) {
       initTimerScheduleDrag(el);
@@ -453,9 +463,24 @@
     var schedule = getSchedule();
     if (idx < 0 || idx >= schedule.items.length) return;
     var taskId = schedule.items[idx].taskId;
-    schedule.items.splice(idx + 1, 0, { taskId: taskId, done: false });
-    saveSchedule(schedule);
-    updateTaskBanner();
+    // Find first empty slot after this one
+    for (var i = idx + 1; i < schedule.items.length; i++) {
+      if (!schedule.items[i].taskId) {
+        schedule.items[i] = { taskId: taskId, done: false };
+        saveSchedule(schedule);
+        updateTaskBanner();
+        return;
+      }
+    }
+    // No empty slot found after — try before
+    for (var i = 0; i < idx; i++) {
+      if (!schedule.items[i].taskId) {
+        schedule.items[i] = { taskId: taskId, done: false };
+        saveSchedule(schedule);
+        updateTaskBanner();
+        return;
+      }
+    }
   }
 
   function initTimerScheduleDrag(el) {
