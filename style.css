@@ -1720,6 +1720,17 @@ body.light-theme .btn-theme-toggle::after {
   box-shadow: 0 0 12px rgba(83, 168, 182, 0.15);
 }
 
+/* Insert indicator line between slots during slot-reorder drag */
+.slot-insert-indicator {
+  position: relative;
+  height: 4px;
+  background: #53a8b6;
+  border-radius: 2px;
+  margin: -2px 0 -2px 48px;
+  z-index: 10;
+  animation: placeholder-pulse 1s ease-in-out infinite;
+}
+
 /* Now indicator in grid */
 .timeslot-now-line {
   position: absolute;

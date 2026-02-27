@@ -1691,9 +1691,9 @@
     }
     scheduleList.classList.remove('drop-active');
     // Remove any placeholders and drop targets
-    var phs = document.querySelectorAll('.schedule-drop-placeholder, .ts-drop-placeholder, .drop-target');
+    var phs = document.querySelectorAll('.schedule-drop-placeholder, .ts-drop-placeholder, .slot-insert-indicator, .drop-target');
     phs.forEach(function (p) { p.classList ? p.classList.remove('drop-target') : p.remove(); });
-    var phs2 = document.querySelectorAll('.schedule-drop-placeholder, .ts-drop-placeholder');
+    var phs2 = document.querySelectorAll('.schedule-drop-placeholder, .ts-drop-placeholder, .slot-insert-indicator');
     phs2.forEach(function (p) { p.remove(); });
     drag.active = false;
     drag.started = false;
@@ -1825,8 +1825,10 @@
     drag.ghost.style.top = (clientY - 20) + 'px';
 
     // Highlight target slot when dragging over the time grid
-    if (drag.type === 'task-to-schedule' || drag.type === 'slot-reorder') {
+    if (drag.type === 'task-to-schedule') {
       updateSlotDropTarget(clientX, clientY);
+    } else if (drag.type === 'slot-reorder') {
+      updateSlotInsertIndicator(clientY);
     } else if (drag.type === 'schedule-reorder') {
       updateReorderPlaceholder(clientY, scheduleList, '.schedule-item', 'schedule-drop-placeholder');
     } else if (drag.type === 'timer-reorder') {
@@ -1847,6 +1849,32 @@
         cells[i].classList.add('drop-target');
         break;
       }
+    }
+  }
+
+  function updateSlotInsertIndicator(clientY) {
+    // Remove previous indicator
+    var old = scheduleList.querySelectorAll('.slot-insert-indicator');
+    old.forEach(function (p) { p.remove(); });
+
+    var rows = scheduleList.querySelectorAll('.timeslot-row');
+    var insertBefore = null;
+
+    for (var i = 0; i < rows.length; i++) {
+      var rect = rows[i].getBoundingClientRect();
+      var midY = rect.top + rect.height / 2;
+      if (clientY < midY) {
+        insertBefore = rows[i];
+        break;
+      }
+    }
+
+    var indicator = document.createElement('div');
+    indicator.className = 'slot-insert-indicator';
+    if (insertBefore) {
+      scheduleList.querySelector('.timeslot-grid').insertBefore(indicator, insertBefore);
+    } else {
+      scheduleList.querySelector('.timeslot-grid').appendChild(indicator);
     }
   }
 
@@ -1914,14 +1942,28 @@
           }
         }
       } else if (drag.type === 'slot-reorder') {
-        // Move slot content to target slot
-        var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
-        if (targetSlotIdx >= 0 && targetSlotIdx !== drag.sourceIdx) {
-          var schedule = getSchedule();
-          var movedItem = schedule.items[drag.sourceIdx];
-          // Swap: put current target content into source slot
-          schedule.items[drag.sourceIdx] = schedule.items[targetSlotIdx];
-          schedule.items[targetSlotIdx] = movedItem;
+        // Insert: remove from source and insert at target position
+        var indicator = scheduleList.querySelector('.slot-insert-indicator');
+        var targetIdx = drag.sourceIdx; // default: no move
+        if (indicator) {
+          var grid = scheduleList.querySelector('.timeslot-grid');
+          var rows = grid.querySelectorAll('.timeslot-row');
+          var count = 0;
+          var sibling = grid.firstChild;
+          while (sibling) {
+            if (sibling === indicator) break;
+            if (sibling.classList && sibling.classList.contains('timeslot-row')) count++;
+            sibling = sibling.nextSibling;
+          }
+          targetIdx = count;
+        }
+        var schedule = getSchedule();
+        var fromIdx = drag.sourceIdx;
+        // Adjust target: if dropping below source, account for removal shift
+        if (targetIdx > fromIdx) targetIdx--;
+        if (fromIdx !== targetIdx) {
+          var movedItem = schedule.items.splice(fromIdx, 1)[0];
+          schedule.items.splice(targetIdx, 0, movedItem);
           saveSchedule(schedule);
         }
         renderSchedule();
