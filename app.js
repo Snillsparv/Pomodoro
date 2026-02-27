@@ -1271,6 +1271,7 @@
         pickerTargetSlotIdx = parseInt(cell.dataset.slotIdx);
         renderSchedulePicker();
         scheduleModal.classList.remove('hidden');
+        pickerNewName.focus();
       });
     });
 
@@ -1398,6 +1399,7 @@
     pickerTargetSlotIdx = -1;
     renderSchedulePicker();
     scheduleModal.classList.remove('hidden');
+    pickerNewName.focus();
   });
 
   btnClosePicker.addEventListener('click', function () {
@@ -1406,14 +1408,60 @@
     renderSchedule();
   });
 
+  // --- Picker: new task form ---
+  var pickerNewName = document.getElementById('picker-new-name');
+  var pickerNewProject = document.getElementById('picker-new-project');
+  var btnPickerNewSave = document.getElementById('btn-picker-new-save');
+
+  function populatePickerProjectDropdown() {
+    var projects = getProjects();
+    pickerNewProject.innerHTML = '<option value="">\u00d6vrigt</option>' +
+      projects.map(function (p) {
+        return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
+      }).join('');
+  }
+
+  function savePickerNewTask() {
+    var name = pickerNewName.value.trim();
+    if (!name) return;
+    var projectId = pickerNewProject.value || null;
+
+    // Create project if none exist and user picked "Övrigt"
+    var tasks = getTasks();
+    var taskId = generateId();
+    tasks.push({ id: taskId, projectId: projectId, name: name });
+    saveTasks(tasks);
+
+    // Add to target slot or first empty
+    addToSchedule(taskId, pickerTargetSlotIdx);
+
+    // Close and refresh
+    pickerNewName.value = '';
+    if (pickerTargetSlotIdx >= 0) {
+      scheduleModal.classList.add('hidden');
+      pickerTargetSlotIdx = -1;
+    }
+    renderPlanView();
+    updateTaskBanner();
+  }
+
+  btnPickerNewSave.addEventListener('click', savePickerNewTask);
+  pickerNewName.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') savePickerNewTask();
+  });
+
   function renderSchedulePicker() {
     var projects = getProjects();
     var tasks = getTasks();
     var schedule = getSchedule();
     var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
 
-    if (projects.length === 0) {
-      schedulePicker.innerHTML = '<div class="no-data">Skapa ett projekt f&ouml;rst</div>';
+    // Populate project dropdown for new task form
+    populatePickerProjectDropdown();
+    pickerNewName.value = '';
+
+    if (projects.length === 0 && tasks.length === 0) {
+      schedulePicker.innerHTML = '<div class="no-data">Inga uppgifter &auml;nnu</div>';
       return;
     }
 

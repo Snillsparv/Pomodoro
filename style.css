@@ -1156,7 +1156,77 @@ body.light-theme .btn-theme-toggle::after {
   padding: 6px 0;
 }
 
-/* Schedule picker modal */
+/* Schedule picker modal — new task form */
+.picker-new-task {
+  margin-bottom: 0;
+}
+
+.picker-new-task input[type="text"] {
+  width: 100%;
+  padding: 14px 16px;
+  border: 2px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.2s;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.picker-new-task input[type="text"]:focus {
+  border-color: var(--accent);
+}
+
+.picker-new-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#picker-new-project {
+  flex: 1;
+  padding: 10px 12px;
+  border: 2px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-input);
+  color: var(--text-secondary);
+  font-size: 14px;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%238888aa' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+
+#btn-picker-new-save {
+  padding: 10px 18px;
+  border: none;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+#btn-picker-new-save:active {
+  transform: scale(0.96);
+  background: var(--accent-dark);
+}
+
+.picker-divider {
+  height: 1px;
+  background: var(--border-color);
+  margin: 16px 0;
+}
+
+/* Schedule picker modal — existing tasks */
 .picker-project {
   margin-bottom: 16px;
 }
