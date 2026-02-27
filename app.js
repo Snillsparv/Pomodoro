@@ -405,14 +405,8 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         haptic(12);
-        var schedule = getSchedule();
-        var idx = parseInt(btn.dataset.idx);
-        if (idx < schedule.items.length) {
-          schedule.items[idx].done = true;
-          saveSchedule(schedule);
-          updateTaskBanner();
-          checkAllDoneConfetti();
-        }
+        markSlotDone(parseInt(btn.dataset.idx));
+        updateTaskBanner();
       });
     });
 
@@ -520,6 +514,39 @@
     }
     todayPomodoros = count;
     updatePomodoroCount();
+  }
+
+  // Mark a schedule slot as done AND log a session for statistics
+  function markSlotDone(idx) {
+    var schedule = getSchedule();
+    if (idx < 0 || idx >= schedule.items.length) return;
+    var item = schedule.items[idx];
+    if (!item.taskId || item.done) return;
+
+    item.done = true;
+    saveSchedule(schedule);
+
+    // Log session for statistics
+    var tasks = getTasks();
+    var projects = getProjects();
+    var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
+    var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+    var projLabel = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
+    var activityName = (projLabel ? projLabel + ' — ' : '') + (task ? task.name : 'Okänd');
+
+    var sessions = getSessions();
+    sessions.push({
+      activity: activityName,
+      duration: WORK_MINUTES,
+      date: todayStr(),
+      timestamp: Date.now()
+    });
+    saveSessions(sessions);
+
+    todayPomodoros++;
+    updatePomodoroCount();
+    updateStreakCounter();
+    checkAllDoneConfetti();
   }
 
   // --- Alarm sound (Web Audio API + <audio> fallback for background tabs) ---
@@ -2611,13 +2638,8 @@
         haptic(15);
         el.classList.add('swipe-away');
         setTimeout(function () {
-          var schedule = getSchedule();
-          if (idx < schedule.items.length) {
-            schedule.items[idx].done = true;
-            saveSchedule(schedule);
-            updateTaskBanner();
-            checkAllDoneConfetti();
-          }
+          markSlotDone(idx);
+          updateTaskBanner();
         }, 250);
         return;
       } else if (dx < -threshold) {
