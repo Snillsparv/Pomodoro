@@ -2302,51 +2302,94 @@
     statsPeriodLabel.textContent = range.label;
 
     var sessions = getSessions();
+    var projects = getProjects();
     var filtered = sessions.filter(function (s) {
       return s.date >= range.start && s.date <= range.end;
     });
 
-    var activities = {};
     var totalMinutes = 0;
+    filtered.forEach(function (s) { totalMinutes += s.duration; });
+
+    // Group by project (part before " — ") and track tasks within
+    var projectMap = {};
     filtered.forEach(function (s) {
-      if (!activities[s.activity]) {
-        activities[s.activity] = { minutes: 0, count: 0 };
+      var parts = s.activity.split(' — ');
+      var projName = parts.length > 1 ? parts[0] : 'Övrigt';
+      var taskName = parts.length > 1 ? parts.slice(1).join(' — ') : s.activity;
+
+      if (!projectMap[projName]) {
+        projectMap[projName] = { minutes: 0, count: 0, tasks: {} };
       }
-      activities[s.activity].minutes += s.duration;
-      activities[s.activity].count++;
-      totalMinutes += s.duration;
+      projectMap[projName].minutes += s.duration;
+      projectMap[projName].count++;
+
+      if (!projectMap[projName].tasks[taskName]) {
+        projectMap[projName].tasks[taskName] = { minutes: 0, count: 0 };
+      }
+      projectMap[projName].tasks[taskName].minutes += s.duration;
+      projectMap[projName].tasks[taskName].count++;
     });
 
-    var sorted = Object.keys(activities).map(function (name) {
-      return { name: name, minutes: activities[name].minutes, count: activities[name].count };
+    // Match project colors
+    var sortedProjects = Object.keys(projectMap).map(function (name) {
+      var proj = projects.filter(function (p) { return p.name === name; })[0];
+      var color = getProjectColor(proj);
+      return { name: name, minutes: projectMap[name].minutes, count: projectMap[name].count, tasks: projectMap[name].tasks, color: color };
     }).sort(function (a, b) { return b.minutes - a.minutes; });
 
+    // Summary
     var hours = Math.floor(totalMinutes / 60);
     var mins = totalMinutes % 60;
     var timeStr = hours > 0 ? hours + 'h ' + mins + 'min' : mins + ' min';
+
+    // Build stacked bar segments
+    var barSegments = '';
+    if (totalMinutes > 0) {
+      barSegments = sortedProjects.map(function (p) {
+        var pct = (p.minutes / totalMinutes) * 100;
+        return '<div class="stacked-segment" style="width:' + pct + '%;background:' + p.color + '" title="' + escapeHtml(p.name) + '"></div>';
+      }).join('');
+    }
+
     statsSummary.innerHTML =
       '<div class="total-time">' + timeStr + '</div>' +
       '<div class="total-label">Total tid</div>' +
-      '<div class="total-sessions">' + filtered.length + ' pomodoro' + (filtered.length !== 1 ? 's' : '') + '</div>';
+      '<div class="total-sessions">' + filtered.length + ' pomodoro' + (filtered.length !== 1 ? 's' : '') + '</div>' +
+      (totalMinutes > 0 ? '<div class="stacked-bar">' + barSegments + '</div>' : '');
 
-    if (sorted.length === 0) {
+    if (sortedProjects.length === 0) {
       statsBreakdown.innerHTML = '<div class="no-data">Inga sessioner under denna period</div>';
       return;
     }
 
-    var maxMinutes = sorted[0].minutes;
-    statsBreakdown.innerHTML = sorted.map(function (item) {
-      var pct = Math.round((item.minutes / maxMinutes) * 100);
-      var h = Math.floor(item.minutes / 60);
-      var m = item.minutes % 60;
+    // Breakdown per project with individual bars
+    var maxMinutes = sortedProjects[0].minutes;
+    statsBreakdown.innerHTML = sortedProjects.map(function (proj) {
+      var pct = Math.round((proj.minutes / maxMinutes) * 100);
+      var h = Math.floor(proj.minutes / 60);
+      var m = proj.minutes % 60;
       var t = h > 0 ? h + 'h ' + m + 'min' : m + ' min';
+
+      // Task list within project
+      var taskList = Object.keys(proj.tasks).map(function (taskName) {
+        var task = proj.tasks[taskName];
+        var th = Math.floor(task.minutes / 60);
+        var tm = task.minutes % 60;
+        var tt = th > 0 ? th + 'h ' + tm + 'min' : tm + ' min';
+        return '<div class="activity-task">' +
+          '<span class="activity-task-name">' + escapeHtml(taskName) + '</span>' +
+          '<span class="activity-task-time">' + tt + ' (' + task.count + ')' + '</span>' +
+          '</div>';
+      }).sort().join('');
+
       return '<div class="activity-row">' +
         '<div class="activity-header">' +
-        '<span class="activity-name">' + escapeHtml(item.name) + '</span>' +
-        '<span class="activity-time">' + t + '</span>' +
+        '<span class="activity-name"><span class="activity-color-dot" style="background:' + proj.color + '"></span>' + escapeHtml(proj.name) + '</span>' +
+        '<span class="activity-time" style="color:' + proj.color + '">' + t + '</span>' +
         '</div>' +
-        '<div class="activity-bar-bg"><div class="activity-bar" style="width:' + pct + '%"></div></div>' +
-        '<div class="activity-sessions">' + item.count + ' session' + (item.count !== 1 ? 'er' : '') + '</div>' +
+        '<div class="activity-bar-bg"><div class="activity-bar" style="width:' + pct + '%;background:' + proj.color + '"></div></div>' +
+        '<div class="activity-tasks">' + taskList + '</div>' +
+        '<div class="activity-sessions">' + proj.count + ' session' + (proj.count !== 1 ? 'er' : '') + '</div>' +
         '</div>';
     }).join('');
   }

@@ -1416,15 +1416,79 @@ body.light-theme .btn-theme-toggle::after {
 
 .activity-row .activity-bar {
   height: 100%;
-  background: #e94560;
   border-radius: 4px;
-  transition: width 0.3s;
+  transition: width 0.5s ease;
 }
 
 .activity-row .activity-sessions {
   font-size: 13px;
   color: #8888aa;
   margin-top: 8px;
+}
+
+/* Stacked bar chart in summary */
+.stacked-bar {
+  display: flex;
+  height: 14px;
+  border-radius: 7px;
+  overflow: hidden;
+  margin-top: 16px;
+  gap: 2px;
+}
+
+.stacked-segment {
+  height: 100%;
+  min-width: 4px;
+  transition: width 0.4s ease;
+}
+
+.stacked-segment:first-child {
+  border-radius: 7px 0 0 7px;
+}
+
+.stacked-segment:last-child {
+  border-radius: 0 7px 7px 0;
+}
+
+.stacked-segment:only-child {
+  border-radius: 7px;
+}
+
+/* Color dot next to project name */
+.activity-color-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+/* Task breakdown within a project */
+.activity-tasks {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.activity-task {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0 4px 18px;
+  border-left: 2px solid var(--border-color);
+}
+
+.activity-task-name {
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.activity-task-time {
+  font-size: 13px;
+  color: #8888aa;
+  flex-shrink: 0;
+  margin-left: 8px;
 }
 
 .no-data {
