@@ -190,6 +190,16 @@
     }
   }
 
+  function saveScheduleForDate(dateStr, schedule) {
+    if (dateStr === todayStr()) {
+      saveSchedule(schedule);
+    } else {
+      var history = getScheduleHistory();
+      history[dateStr] = schedule.items;
+      saveScheduleHistory(history);
+    }
+  }
+
   function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   }
@@ -1011,9 +1021,10 @@
   function formatDateLabel(dateStr) {
     var today = todayStr();
     if (dateStr === today) return 'Idag';
-    var yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (dateStr === yesterday.toISOString().slice(0, 10)) return 'Ig\u00e5r';
+    var tomorrow = addDays(today, 1);
+    if (dateStr === tomorrow) return 'Imorgon';
+    var yesterday = addDays(today, -1);
+    if (dateStr === yesterday) return 'Ig\u00e5r';
     var d = new Date(dateStr + 'T12:00:00');
     return d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
   }
@@ -1030,34 +1041,48 @@
     return dates;
   }
 
+  function addDays(dateStr, n) {
+    var d = new Date(dateStr + 'T12:00:00');
+    d.setDate(d.getDate() + n);
+    return d.toISOString().slice(0, 10);
+  }
+
+  function maxFutureDate() {
+    return addDays(todayStr(), 7);
+  }
+
+  function isFutureOrToday(dateStr) {
+    return dateStr >= todayStr();
+  }
+
   function updateScheduleDateNav() {
     var viewDate = scheduleViewDate || todayStr();
     var isToday = viewDate === todayStr();
+    var isFuture = viewDate > todayStr();
+    var isEditable = isFutureOrToday(viewDate);
 
     scheduleDateLabel.textContent = formatDateLabel(viewDate);
 
-    // Can always go back if there's history before current view
+    // Prev: always possible (go to previous day)
+    var prevDay = addDays(viewDate, -1);
+    // Disable prev only if there's no history before this date and it's already before today
     var dates = getScheduleDates();
-    var currentIdx = dates.indexOf(viewDate);
-
-    // Prev: enabled if there are dates before current, or if we're on today and there's any history
     var hasPrev = false;
-    if (currentIdx > 0) {
-      hasPrev = true;
-    } else if (currentIdx === -1 && dates.length > 0) {
-      // viewDate is not in the list — check if there are dates before it
+    if (viewDate > todayStr()) {
+      hasPrev = true; // can always go back from future
+    } else {
       for (var i = 0; i < dates.length; i++) {
         if (dates[i] < viewDate) { hasPrev = true; break; }
       }
     }
     schedulePrev.disabled = !hasPrev;
 
-    // Next: enabled if we're viewing history and there are newer dates or we can go to today
-    scheduleNext.disabled = isToday;
+    // Next: enabled up to 7 days ahead
+    scheduleNext.disabled = viewDate >= maxFutureDate();
 
-    // Show/hide editing controls based on whether viewing today
-    btnAddToSchedule.style.display = isToday ? '' : 'none';
-    scheduleHeading.textContent = isToday ? 'Dagens schema' : 'Schema';
+    // Show editing controls for today and future dates
+    btnAddToSchedule.style.display = isEditable ? '' : 'none';
+    scheduleHeading.textContent = isToday ? 'Dagens schema' : (isFuture ? formatDateLabel(viewDate) : 'Schema');
     document.getElementById('schedule-time-bar').style.display = isToday ? '' : 'none';
   }
 
@@ -1065,7 +1090,8 @@
   function renderProjects() {
     var projects = getProjects();
     var tasks = getTasks();
-    var schedule = getSchedule();
+    var gridDate = scheduleViewDate || todayStr();
+    var schedule = getScheduleForDate(gridDate);
     var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
 
     if (projects.length === 0) {
@@ -1204,36 +1230,33 @@
   // --- Schedule date navigation ---
   schedulePrev.addEventListener('click', function () {
     var viewDate = scheduleViewDate || todayStr();
-    var dates = getScheduleDates();
-    // Find the closest date before current viewDate
-    var prevDate = null;
-    for (var i = dates.length - 1; i >= 0; i--) {
-      if (dates[i] < viewDate) { prevDate = dates[i]; break; }
+    if (viewDate > todayStr()) {
+      // Future: step back one day
+      var prev = addDays(viewDate, -1);
+      scheduleViewDate = prev === todayStr() ? null : prev;
+    } else {
+      // Past: jump to previous date with data
+      var dates = getScheduleDates();
+      var prevDate = null;
+      for (var i = dates.length - 1; i >= 0; i--) {
+        if (dates[i] < viewDate) { prevDate = dates[i]; break; }
+      }
+      if (prevDate) scheduleViewDate = prevDate;
+      else return;
     }
-    if (prevDate) {
-      scheduleViewDate = prevDate;
-      updateScheduleDateNav();
-      renderSchedule();
-    }
+    updateScheduleDateNav();
+    renderSchedule();
+    renderProjects();
   });
 
   scheduleNext.addEventListener('click', function () {
     var viewDate = scheduleViewDate || todayStr();
-    if (viewDate === todayStr()) return;
-    var dates = getScheduleDates();
-    // Find the closest date after current viewDate
-    var nextDate = null;
-    for (var i = 0; i < dates.length; i++) {
-      if (dates[i] > viewDate) { nextDate = dates[i]; break; }
-    }
-    // If no next date in history, go to today
-    if (!nextDate || nextDate >= todayStr()) {
-      scheduleViewDate = null;
-    } else {
-      scheduleViewDate = nextDate;
-    }
+    if (viewDate >= maxFutureDate()) return;
+    var nextDay = addDays(viewDate, 1);
+    scheduleViewDate = nextDay === todayStr() ? null : nextDay;
     updateScheduleDateNav();
     renderSchedule();
+    renderProjects();
   });
 
   // --- Schedule ---
@@ -1246,17 +1269,20 @@
     var schedule = isToday ? getSchedule() : getScheduleForDate(viewDate);
     var tasks = getTasks();
     var projects = getProjects();
+    var isEditable = isFutureOrToday(viewDate);
 
-    if (isToday) {
-      renderScheduleGrid(schedule, tasks, projects);
+    if (isEditable) {
+      renderScheduleGrid(schedule, tasks, projects, viewDate);
     } else {
       renderScheduleHistory(schedule, tasks, projects);
     }
   }
 
-  function renderScheduleGrid(schedule, tasks, projects) {
+  function renderScheduleGrid(schedule, tasks, projects, viewDate) {
+    var gridDate = viewDate || todayStr();
+    var isToday = gridDate === todayStr();
     scheduleEmpty.classList.add('hidden');
-    updateTimeEstimate();
+    if (isToday) updateTimeEstimate();
 
     var slotCount = getSlotCount();
     var dayStart = getDayStartMinutes();
@@ -1266,11 +1292,13 @@
     while (schedule.items.length < slotCount) {
       schedule.items.push({ taskId: null, done: false });
     }
-    // Save if we padded
-    var storedSchedule = JSON.parse(localStorage.getItem('pomodoro_schedule') || '{}');
-    var storedLen = storedSchedule.items ? storedSchedule.items.length : 0;
+    // Save if we padded and items changed
+    var stored = isToday
+      ? JSON.parse(localStorage.getItem('pomodoro_schedule') || '{}')
+      : getScheduleForDate(gridDate);
+    var storedLen = stored.items ? stored.items.length : 0;
     if (schedule.items.length !== storedLen) {
-      saveSchedule(schedule);
+      saveScheduleForDate(gridDate, schedule);
     }
 
     var html = '<div class="timeslot-grid">';
@@ -1291,11 +1319,13 @@
       // Time label
       html += '<div class="timeslot-time">' + timeLabel + '</div>';
 
-      // Now indicator
-      var slotEnd = slotMin + 30;
-      if (nowMin >= slotMin && nowMin < slotEnd) {
-        var pct = ((nowMin - slotMin) / 30) * 100;
-        html += '<div class="timeslot-now-line" style="top:' + pct + '%"></div>';
+      // Now indicator (only for today)
+      if (isToday) {
+        var slotEnd = slotMin + 30;
+        if (nowMin >= slotMin && nowMin < slotEnd) {
+          var pct = ((nowMin - slotMin) / 30) * 100;
+          html += '<div class="timeslot-now-line" style="top:' + pct + '%"></div>';
+        }
       }
 
       if (item.taskId) {
@@ -1354,12 +1384,12 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         var idx = parseInt(btn.dataset.slotIdx);
-        var schedule = getSchedule();
-        if (idx < schedule.items.length) {
-          schedule.items[idx] = { taskId: null, done: false };
-          saveSchedule(schedule);
+        var sch = getScheduleForDate(gridDate);
+        if (idx < sch.items.length) {
+          sch.items[idx] = { taskId: null, done: false };
+          saveScheduleForDate(gridDate, sch);
           renderPlanView();
-          updateTaskBanner();
+          if (isToday) updateTaskBanner();
         }
       });
     });
@@ -1519,7 +1549,8 @@
   function renderSchedulePicker() {
     var projects = getProjects();
     var tasks = getTasks();
-    var schedule = getSchedule();
+    var gridDate = scheduleViewDate || todayStr();
+    var schedule = getScheduleForDate(gridDate);
     var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
 
     // Populate project dropdown for new task form
@@ -1567,7 +1598,8 @@
   }
 
   function addToSchedule(taskId, targetSlotIdx) {
-    var schedule = getSchedule();
+    var gridDate = scheduleViewDate || todayStr();
+    var schedule = getScheduleForDate(gridDate);
     var slotCount = getSlotCount();
 
     // Ensure array is big enough
@@ -1593,7 +1625,7 @@
         schedule.items.push({ taskId: taskId, done: false });
       }
     }
-    saveSchedule(schedule);
+    saveScheduleForDate(gridDate, schedule);
   }
 
   // ========================================
@@ -2034,7 +2066,8 @@
         // Shift-move: take item out and shift items in between
         var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
         if (targetSlotIdx >= 0 && targetSlotIdx !== drag.sourceIdx) {
-          var schedule = getSchedule();
+          var gridDate = scheduleViewDate || todayStr();
+          var schedule = getScheduleForDate(gridDate);
           var from = drag.sourceIdx;
           var to = targetSlotIdx;
           var movedItem = schedule.items[from];
@@ -2044,10 +2077,10 @@
             for (var i = from; i > to; i--) schedule.items[i] = schedule.items[i - 1];
           }
           schedule.items[to] = movedItem;
-          saveSchedule(schedule);
+          saveScheduleForDate(gridDate, schedule);
         }
         renderSchedule();
-        updateTaskBanner();
+        if ((scheduleViewDate || todayStr()) === todayStr()) updateTaskBanner();
       } else if (drag.type === 'schedule-reorder') {
         // Group-based reorder in plan view (for history)
         var ph = scheduleList.querySelector('.schedule-drop-placeholder');
