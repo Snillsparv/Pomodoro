@@ -371,14 +371,14 @@
           ? '<span class="ts-check">&check;</span>'
           : '<span class="ts-dot" style="background:' + color + '"></span>';
 
-        var actionBtns = '';
+        var actionBtns = '<button class="ts-add-pom btn-tiny" data-idx="' + i + '" title="Lägg till pomodoro">+</button>';
         if (item.done) {
-          actionBtns = '<button class="ts-add-pom btn-tiny" data-idx="' + i + '" title="Lägg till pomodoro">+</button>';
+          // done: only + button
         } else if (isPast) {
-          actionBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + i + '" title="Markera klar">&check;</button>' +
+          actionBtns += '<button class="ts-mark-done btn-tiny" data-idx="' + i + '" title="Markera klar">&check;</button>' +
             '<button class="ts-mark-remove btn-tiny" data-idx="' + i + '" title="Ta bort">&times;</button>';
         } else {
-          actionBtns = '<button class="ts-mark-remove btn-tiny" data-idx="' + i + '" title="Ta bort">&times;</button>';
+          actionBtns += '<button class="ts-mark-remove btn-tiny" data-idx="' + i + '" title="Ta bort">&times;</button>';
         }
 
         html += '<div class="' + cls + '" data-idx="' + i + '" data-task-id="' + item.taskId + '">' +
