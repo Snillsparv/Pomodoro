@@ -2111,6 +2111,15 @@
     // Highlight target slot when dragging over the time grid
     if (drag.type === 'task-to-schedule' || drag.type === 'slot-reorder' || drag.type === 'backlog-to-schedule') {
       updateSlotDropTarget(clientX, clientY);
+      // Highlight backlog when dragging a slot over it
+      var blSection = document.getElementById('backlog-section');
+      if (blSection) {
+        if (drag.type === 'slot-reorder' && isOverBacklog(clientX, clientY)) {
+          blSection.classList.add('backlog-drop-hover');
+        } else {
+          blSection.classList.remove('backlog-drop-hover');
+        }
+      }
     } else if (drag.type === 'schedule-reorder') {
       updateReorderPlaceholder(clientY, scheduleList, '.schedule-item', 'schedule-drop-placeholder');
     } else if (drag.type === 'timer-reorder') {
@@ -2222,6 +2231,14 @@
     return -1;
   }
 
+  function isOverBacklog(clientX, clientY) {
+    var blSection = document.getElementById('backlog-section');
+    if (!blSection || blSection.style.display === 'none') return false;
+    var rect = blSection.getBoundingClientRect();
+    return clientY >= rect.top - 20 && clientY <= rect.bottom + 20 &&
+           clientX >= rect.left - 20 && clientX <= rect.right + 20;
+  }
+
   // --- Global end handler ---
   function onDragEnd(clientX, clientY) {
     if (!drag.active) return;
@@ -2229,6 +2246,8 @@
     // Clear drop-target highlights
     var targets = document.querySelectorAll('.drop-target');
     targets.forEach(function (el) { el.classList.remove('drop-target'); });
+    var blHover = document.getElementById('backlog-section');
+    if (blHover) blHover.classList.remove('backlog-drop-hover');
 
     if (drag.started) {
       if (drag.type === 'task-to-schedule') {
@@ -2262,24 +2281,35 @@
         removeFromBacklog(drag.taskId);
         renderPlanView();
       } else if (drag.type === 'slot-reorder') {
-        // Shift-move: take item out and shift items in between
-        var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
-        if (targetSlotIdx >= 0 && targetSlotIdx !== drag.sourceIdx) {
-          var gridDate = scheduleViewDate || todayStr();
+        var gridDate = scheduleViewDate || todayStr();
+        if (isOverBacklog(clientX, clientY)) {
+          // Dropped over backlog: move task from schedule to backlog
+          addToBacklog(drag.taskId);
           var schedule = getScheduleForDate(gridDate);
-          var from = drag.sourceIdx;
-          var to = targetSlotIdx;
-          var movedItem = schedule.items[from];
-          if (from < to) {
-            for (var i = from; i < to; i++) schedule.items[i] = schedule.items[i + 1];
-          } else {
-            for (var i = from; i > to; i--) schedule.items[i] = schedule.items[i - 1];
+          if (drag.sourceIdx < schedule.items.length) {
+            schedule.items[drag.sourceIdx] = { taskId: null, done: false };
+            saveScheduleForDate(gridDate, schedule);
           }
-          schedule.items[to] = movedItem;
-          saveScheduleForDate(gridDate, schedule);
+          renderPlanView();
+        } else {
+          // Shift-move within schedule
+          var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
+          if (targetSlotIdx >= 0 && targetSlotIdx !== drag.sourceIdx) {
+            var schedule = getScheduleForDate(gridDate);
+            var from = drag.sourceIdx;
+            var to = targetSlotIdx;
+            var movedItem = schedule.items[from];
+            if (from < to) {
+              for (var i = from; i < to; i++) schedule.items[i] = schedule.items[i + 1];
+            } else {
+              for (var i = from; i > to; i--) schedule.items[i] = schedule.items[i - 1];
+            }
+            schedule.items[to] = movedItem;
+            saveScheduleForDate(gridDate, schedule);
+          }
+          renderSchedule();
         }
-        renderSchedule();
-        if ((scheduleViewDate || todayStr()) === todayStr()) updateTaskBanner();
+        if (gridDate === todayStr()) updateTaskBanner();
       } else if (drag.type === 'schedule-reorder') {
         // Group-based reorder in plan view (for history)
         var ph = scheduleList.querySelector('.schedule-drop-placeholder');
