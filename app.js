@@ -66,6 +66,9 @@
   var schedulePrev = document.getElementById('schedule-prev');
   var scheduleNext = document.getElementById('schedule-next');
   var scheduleDateLabel = document.getElementById('schedule-date-label');
+  var backlogList = document.getElementById('backlog-list');
+  var backlogEmpty = document.getElementById('backlog-empty');
+  var btnAddBacklog = document.getElementById('btn-add-backlog');
   var carryoverBanner = document.getElementById('carryover-banner');
   var carryoverMessage = document.getElementById('carryover-message');
   var btnCarryover = document.getElementById('btn-carryover');
@@ -111,6 +114,17 @@
 
   function todayStr() {
     return new Date().toISOString().slice(0, 10);
+  }
+
+  function getBacklog(dateStr) {
+    var all = JSON.parse(localStorage.getItem('pomodoro_backlog') || '{}');
+    return all[dateStr || todayStr()] || [];
+  }
+
+  function saveBacklog(dateStr, items) {
+    var all = JSON.parse(localStorage.getItem('pomodoro_backlog') || '{}');
+    all[dateStr || todayStr()] = items;
+    localStorage.setItem('pomodoro_backlog', JSON.stringify(all));
   }
 
   function getScheduleHistory() {
@@ -1014,8 +1028,124 @@
   function renderPlanView() {
     updateScheduleDateNav();
     renderCarryoverBanner();
+    renderBacklog();
     renderSchedule();
     renderProjects();
+  }
+
+  // ========================================
+  // Backlog — "Att göra" list
+  // ========================================
+  function renderBacklog() {
+    var gridDate = scheduleViewDate || todayStr();
+    var isEditable = isFutureOrToday(gridDate);
+    var backlogSection = document.getElementById('backlog-section');
+
+    // Hide backlog for historical dates
+    if (!isEditable) {
+      backlogSection.style.display = 'none';
+      return;
+    }
+    backlogSection.style.display = '';
+
+    var items = getBacklog(gridDate);
+    var tasks = getTasks();
+    var projects = getProjects();
+
+    if (items.length === 0) {
+      backlogList.innerHTML = '';
+      backlogEmpty.classList.remove('hidden');
+      return;
+    }
+
+    backlogEmpty.classList.add('hidden');
+
+    backlogList.innerHTML = items.map(function (taskId, idx) {
+      var task = tasks.filter(function (t) { return t.id === taskId; })[0];
+      var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+      var color = getProjectColor(project);
+      var taskName = task ? task.name : 'Borttagen';
+      var projName = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
+
+      return '<div class="backlog-item" data-task-id="' + taskId + '" data-backlog-idx="' + idx + '">' +
+        '<span class="backlog-dot" style="background:' + color + '"></span>' +
+        '<span class="backlog-name">' + escapeHtml(taskName) + '</span>' +
+        '<span class="backlog-project" style="color:' + color + '">' + escapeHtml(projName) + '</span>' +
+        '<button class="btn-backlog-remove btn-tiny" data-backlog-idx="' + idx + '" title="Ta bort">&times;</button>' +
+        '</div>';
+    }).join('');
+
+    // Remove from backlog
+    backlogList.querySelectorAll('.btn-backlog-remove').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var blItems = getBacklog(gridDate);
+        blItems.splice(parseInt(btn.dataset.backlogIdx), 1);
+        saveBacklog(gridDate, blItems);
+        renderBacklog();
+      });
+    });
+
+    // Init drag on backlog items
+    backlogList.querySelectorAll('.backlog-item').forEach(function (el) {
+      initBacklogDrag(el);
+    });
+  }
+
+  function addToBacklog(taskId) {
+    var gridDate = scheduleViewDate || todayStr();
+    var items = getBacklog(gridDate);
+    if (items.indexOf(taskId) !== -1) return; // already there
+    items.push(taskId);
+    saveBacklog(gridDate, items);
+  }
+
+  function removeFromBacklog(taskId) {
+    var gridDate = scheduleViewDate || todayStr();
+    var items = getBacklog(gridDate);
+    var idx = items.indexOf(taskId);
+    if (idx !== -1) {
+      items.splice(idx, 1);
+      saveBacklog(gridDate, items);
+    }
+  }
+
+  // Backlog + button → open picker in backlog mode
+  var backlogPickerMode = false;
+
+  btnAddBacklog.addEventListener('click', function () {
+    backlogPickerMode = true;
+    pickerTargetSlotIdx = -1;
+    renderSchedulePicker();
+    scheduleModal.classList.remove('hidden');
+    pickerNewName.focus();
+  });
+
+  // Drag from backlog to schedule
+  function initBacklogDrag(el) {
+    var taskId = el.dataset.taskId;
+
+    function onStart(clientX, clientY, e) {
+      if (e.target.closest('.btn-tiny')) return;
+      drag.active = true;
+      drag.started = false;
+      drag.type = 'backlog-to-schedule';
+      drag.taskId = taskId;
+      drag.sourceEl = el;
+      drag.startX = clientX;
+      drag.startY = clientY;
+    }
+
+    el.addEventListener('touchstart', function (e) {
+      if (e.touches.length !== 1) return;
+      var t = e.touches[0];
+      onStart(t.clientX, t.clientY, e);
+    }, { passive: true });
+
+    el.addEventListener('mousedown', function (e) {
+      if (e.button !== 0) return;
+      onStart(e.clientX, e.clientY, e);
+    });
   }
 
   function formatDateLabel(dateStr) {
@@ -1364,6 +1494,7 @@
     // Event: click on empty slot → open picker for that slot
     scheduleList.querySelectorAll('.timeslot-cell.empty').forEach(function (cell) {
       cell.addEventListener('click', function () {
+        backlogPickerMode = false;
         pickerTargetSlotIdx = parseInt(cell.dataset.slotIdx);
         renderSchedulePicker();
         scheduleModal.classList.remove('hidden');
@@ -1492,6 +1623,7 @@
 
   // --- Schedule picker ---
   btnAddToSchedule.addEventListener('click', function () {
+    backlogPickerMode = false;
     pickerTargetSlotIdx = -1;
     renderSchedulePicker();
     scheduleModal.classList.remove('hidden');
@@ -1501,7 +1633,8 @@
   btnClosePicker.addEventListener('click', function () {
     scheduleModal.classList.add('hidden');
     pickerTargetSlotIdx = -1;
-    renderSchedule();
+    backlogPickerMode = false;
+    renderPlanView();
   });
 
   // --- Picker: new task form ---
@@ -1528,8 +1661,12 @@
     tasks.push({ id: taskId, projectId: projectId, name: name });
     saveTasks(tasks);
 
-    // Add to target slot or first empty
-    addToSchedule(taskId, pickerTargetSlotIdx);
+    // Add to backlog or schedule depending on mode
+    if (backlogPickerMode) {
+      addToBacklog(taskId);
+    } else {
+      addToSchedule(taskId, pickerTargetSlotIdx);
+    }
 
     // Close and refresh
     pickerNewName.value = '';
@@ -1552,6 +1689,11 @@
     var gridDate = scheduleViewDate || todayStr();
     var schedule = getScheduleForDate(gridDate);
     var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
+    var backlogItems = getBacklog(gridDate);
+
+    // Update modal title
+    var modalTitle = document.getElementById('picker-modal-title');
+    modalTitle.textContent = backlogPickerMode ? 'Lägg till i att göra' : 'Lägg till i schema';
 
     // Populate project dropdown for new task form
     populatePickerProjectDropdown();
@@ -1567,7 +1709,7 @@
       if (projTasks.length === 0) return '';
 
       var taskBtns = projTasks.map(function (task) {
-        var alreadyAdded = scheduledTaskIds.indexOf(task.id) !== -1;
+        var alreadyAdded = scheduledTaskIds.indexOf(task.id) !== -1 || backlogItems.indexOf(task.id) !== -1;
         return '<button class="picker-task' + (alreadyAdded ? ' added' : '') + '" data-task-id="' + task.id + '">' +
           escapeHtml(task.name) +
           (alreadyAdded ? ' &check;' : '') +
@@ -1583,15 +1725,19 @@
 
     schedulePicker.querySelectorAll('.picker-task:not(.added)').forEach(function (btn) {
       btn.addEventListener('click', function () {
-        addToSchedule(btn.dataset.taskId, pickerTargetSlotIdx);
-        // If we targeted a specific slot, close picker after placing
-        if (pickerTargetSlotIdx >= 0) {
-          scheduleModal.classList.add('hidden');
-          pickerTargetSlotIdx = -1;
-          renderPlanView();
-          updateTaskBanner();
-        } else {
+        if (backlogPickerMode) {
+          addToBacklog(btn.dataset.taskId);
           renderSchedulePicker();
+        } else {
+          addToSchedule(btn.dataset.taskId, pickerTargetSlotIdx);
+          if (pickerTargetSlotIdx >= 0) {
+            scheduleModal.classList.add('hidden');
+            pickerTargetSlotIdx = -1;
+            renderPlanView();
+            updateTaskBanner();
+          } else {
+            renderSchedulePicker();
+          }
         }
       });
     });
@@ -1904,6 +2050,14 @@
         drag.ghost = createGhost(task ? task.name : '', color);
         scheduleList.classList.add('drop-active');
         scheduleEmpty.classList.add('hidden');
+      } else if (drag.type === 'backlog-to-schedule') {
+        var tasks = getTasks();
+        var projects = getProjects();
+        var task = tasks.filter(function (t) { return t.id === drag.taskId; })[0];
+        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
+        var color = getProjectColor(project);
+        drag.ghost = createGhost(task ? task.name : '', color);
+        scheduleList.classList.add('drop-active');
       } else if (drag.type === 'slot-reorder') {
         var slotName = drag.sourceEl.querySelector('.timeslot-task-name');
         drag.ghost = createGhost(slotName ? slotName.textContent : '', null);
@@ -1923,7 +2077,7 @@
     drag.ghost.style.top = (clientY - 20) + 'px';
 
     // Highlight target slot when dragging over the time grid
-    if (drag.type === 'task-to-schedule' || drag.type === 'slot-reorder') {
+    if (drag.type === 'task-to-schedule' || drag.type === 'slot-reorder' || drag.type === 'backlog-to-schedule') {
       updateSlotDropTarget(clientX, clientY);
     } else if (drag.type === 'schedule-reorder') {
       updateReorderPlaceholder(clientY, scheduleList, '.schedule-item', 'schedule-drop-placeholder');
@@ -2062,6 +2216,19 @@
             renderProjects();
           }
         }
+      } else if (drag.type === 'backlog-to-schedule') {
+        var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
+        if (targetSlotIdx >= 0) {
+          addToSchedule(drag.taskId, targetSlotIdx);
+        } else {
+          var scheduleRect = document.getElementById('schedule-section').getBoundingClientRect();
+          var overSchedule = clientY >= scheduleRect.top - 40 && clientY <= scheduleRect.bottom + 40;
+          if (overSchedule) {
+            addToSchedule(drag.taskId, -1);
+          }
+        }
+        removeFromBacklog(drag.taskId);
+        renderPlanView();
       } else if (drag.type === 'slot-reorder') {
         // Shift-move: take item out and shift items in between
         var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
@@ -2121,6 +2288,8 @@
         addToSchedule(drag.taskId, -1);
         renderSchedule();
         renderProjects();
+      } else if (drag.type === 'backlog-to-schedule') {
+        openTaskDetail(drag.taskId);
       } else if (drag.type === 'slot-reorder') {
         openTaskDetail(drag.taskId);
       } else if (drag.type === 'timer-reorder') {

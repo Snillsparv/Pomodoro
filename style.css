@@ -804,6 +804,70 @@ body.light-theme .btn-theme-toggle::after {
   margin-bottom: 0;
 }
 
+/* Backlog section */
+#backlog-section {
+  margin-bottom: 16px;
+}
+
+#backlog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 8px;
+}
+
+.backlog-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border-radius: 10px;
+  cursor: grab;
+  touch-action: none;
+  transition: transform 0.1s, opacity 0.15s;
+}
+
+.backlog-item:active:not(.dragging) {
+  transform: scale(0.98);
+}
+
+.backlog-item.dragging {
+  opacity: 0.2;
+  transform: scale(0.95);
+}
+
+.backlog-item .backlog-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.backlog-item .backlog-name {
+  flex: 1;
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+
+.backlog-item .backlog-project {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.backlog-hint {
+  font-size: 13px;
+  padding: 12px;
+}
+
+.backlog-drop-placeholder {
+  height: 4px;
+  background: #53a8b6;
+  border-radius: 2px;
+  margin: 2px 0;
+  animation: placeholder-pulse 1s ease-in-out infinite;
+}
+
 #schedule-list {
   display: flex;
   flex-direction: column;

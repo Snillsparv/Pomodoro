@@ -88,6 +88,16 @@
             <button id="btn-carryover-dismiss" class="btn-carryover-dismiss">&times;</button>
           </div>
         </div>
+      <!-- Backlog: tasks to do but not yet placed in a time slot -->
+      <div id="backlog-section">
+        <div class="section-header">
+          <h2>Att g&ouml;ra</h2>
+          <button id="btn-add-backlog" class="btn-icon">+</button>
+        </div>
+        <div id="backlog-list"></div>
+        <div id="backlog-empty" class="no-data backlog-hint">L&auml;gg till uppgifter h&auml;r, dra sen till schemat</div>
+      </div>
+
         <div id="schedule-list"></div>
         <div id="schedule-empty" class="no-data">Dra uppgifter hit eller tryck +</div>
       </div>
@@ -107,7 +117,7 @@
     <!-- Add to schedule modal -->
     <div id="schedule-modal" class="modal hidden">
       <div class="modal-content">
-        <h2>L&auml;gg till i schema</h2>
+        <h2 id="picker-modal-title">L&auml;gg till i schema</h2>
         <div class="picker-new-task">
           <input type="text" id="picker-new-name" placeholder="Ny uppgift..." autocomplete="off">
           <div class="picker-new-row">
