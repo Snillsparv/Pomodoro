@@ -800,13 +800,32 @@ body.light-theme .btn-theme-toggle::after {
 }
 
 /* Schedule */
+/* Plan view: schedule + backlog side by side */
+#plan-columns {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+}
+
+#plan-columns > #schedule-section {
+  flex: 1;
+  min-width: 0;
+}
+
+#plan-columns > #backlog-section {
+  width: 260px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+}
+
 #schedule-section {
   margin-bottom: 0;
 }
 
 /* Backlog section */
 #backlog-section {
-  margin-bottom: 16px;
+  margin-bottom: 0;
 }
 
 #backlog-list {
