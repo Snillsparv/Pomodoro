@@ -832,7 +832,8 @@ body.light-theme .btn-theme-toggle::after {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  min-height: 8px;
+  min-height: 40px;
+  cursor: pointer;
 }
 
 .backlog-item {
@@ -877,7 +878,16 @@ body.light-theme .btn-theme-toggle::after {
 .backlog-hint {
   font-size: 13px;
   padding: 12px;
+  cursor: pointer;
+  border: 2px dashed var(--border-color);
+  border-radius: 10px;
+  transition: border-color 0.2s;
 }
+
+.backlog-hint:hover {
+  border-color: var(--accent);
+}
+
 
 .backlog-drop-placeholder {
   height: 4px;

@@ -1071,6 +1071,7 @@
         '<span class="backlog-dot" style="background:' + color + '"></span>' +
         '<span class="backlog-name">' + escapeHtml(taskName) + '</span>' +
         '<span class="backlog-project" style="color:' + color + '">' + escapeHtml(projName) + '</span>' +
+        '<button class="btn-backlog-add btn-tiny" data-task-id="' + taskId + '" title="Lägg till pomodoro">+</button>' +
         '<button class="btn-backlog-remove btn-tiny" data-backlog-idx="' + idx + '" title="Ta bort">&times;</button>' +
         '</div>';
     }).join('');
@@ -1083,6 +1084,15 @@
         blItems.splice(parseInt(btn.dataset.backlogIdx), 1);
         saveBacklog(gridDate, blItems);
         renderBacklog();
+      });
+    });
+
+    // Add pomodoro to schedule from backlog
+    backlogList.querySelectorAll('.btn-backlog-add').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        addToSchedule(btn.dataset.taskId, -1);
+        renderPlanView();
       });
     });
 
@@ -1110,15 +1120,25 @@
     }
   }
 
-  // Backlog + button → open picker in backlog mode
+  // Backlog + button or click on empty area → open picker in backlog mode
   var backlogPickerMode = false;
 
-  btnAddBacklog.addEventListener('click', function () {
+  function openBacklogPicker() {
     backlogPickerMode = true;
     pickerTargetSlotIdx = -1;
     renderSchedulePicker();
     scheduleModal.classList.remove('hidden');
     pickerNewName.focus();
+  }
+
+  btnAddBacklog.addEventListener('click', openBacklogPicker);
+
+  // Click on empty backlog area opens picker
+  backlogEmpty.addEventListener('click', openBacklogPicker);
+
+  // Click on backlog list background (not on an item) opens picker
+  backlogList.addEventListener('click', function (e) {
+    if (!e.target.closest('.backlog-item')) openBacklogPicker();
   });
 
   // Drag from backlog to schedule
@@ -1474,6 +1494,7 @@
           '<span class="timeslot-task-name">' + escapeHtml(taskName) + '</span>' +
           '<span class="timeslot-project-name" style="color:' + color + '">' + escapeHtml(projectName) + '</span>' +
           '<div class="timeslot-actions">' +
+          '<button class="btn-slot-add btn-tiny" data-slot-idx="' + i + '" data-task-id="' + item.taskId + '" title="Lägg till pomodoro">+</button>' +
           '<button class="btn-slot-remove btn-tiny" data-slot-idx="' + i + '" title="Ta bort">&times;</button>' +
           '</div>' +
           '</div>';
@@ -1522,6 +1543,17 @@
           renderPlanView();
           if (isToday) updateTaskBanner();
         }
+      });
+    });
+
+    // Event: add pomodoro of same task to next empty slot
+    scheduleList.querySelectorAll('.btn-slot-add').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var taskId = btn.dataset.taskId;
+        addToSchedule(taskId, -1);
+        renderPlanView();
+        if (isToday) updateTaskBanner();
       });
     });
 
