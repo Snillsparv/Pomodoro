@@ -69,6 +69,10 @@
   var backlogList = document.getElementById('backlog-list');
   var backlogEmpty = document.getElementById('backlog-empty');
   var btnAddBacklog = document.getElementById('btn-add-backlog');
+  var backlogCarryoverBanner = document.getElementById('backlog-carryover');
+  var backlogCarryoverMessage = document.getElementById('backlog-carryover-message');
+  var btnBacklogCarryover = document.getElementById('btn-backlog-carryover');
+  var btnBacklogCarryoverDismiss = document.getElementById('btn-backlog-carryover-dismiss');
   var carryoverBanner = document.getElementById('carryover-banner');
   var carryoverMessage = document.getElementById('carryover-message');
   var btnCarryover = document.getElementById('btn-carryover');
@@ -1023,11 +1027,84 @@
   btnCarryoverDismiss.addEventListener('click', dismissCarryover);
 
   // ========================================
+  // Backlog carryover from previous day
+  // ========================================
+  function getBacklogCarryoverItems() {
+    var viewDate = scheduleViewDate || todayStr();
+    var all = JSON.parse(localStorage.getItem('pomodoro_backlog') || '{}');
+    var dates = Object.keys(all).filter(function (d) {
+      return d < viewDate && all[d] && all[d].length > 0;
+    });
+    if (dates.length === 0) return null;
+    dates.sort();
+    var lastDate = dates[dates.length - 1];
+    var tasks = getTasks();
+    var taskIds = tasks.map(function (t) { return t.id; });
+    // Filter to only tasks that still exist
+    var valid = all[lastDate].filter(function (taskId) {
+      return taskIds.indexOf(taskId) !== -1;
+    });
+    if (valid.length === 0) return null;
+    return { date: lastDate, items: valid };
+  }
+
+  function isBacklogCarryoverDismissed() {
+    var viewDate = scheduleViewDate || todayStr();
+    var dismissed = JSON.parse(localStorage.getItem('pomodoro_backlog_carryover_dismissed') || '{}');
+    return dismissed[viewDate] === true;
+  }
+
+  function dismissBacklogCarryover() {
+    var viewDate = scheduleViewDate || todayStr();
+    var dismissed = JSON.parse(localStorage.getItem('pomodoro_backlog_carryover_dismissed') || '{}');
+    dismissed[viewDate] = true;
+    localStorage.setItem('pomodoro_backlog_carryover_dismissed', JSON.stringify(dismissed));
+    backlogCarryoverBanner.classList.add('hidden');
+  }
+
+  function carryoverBacklogTasks() {
+    var viewDate = scheduleViewDate || todayStr();
+    var carryover = getBacklogCarryoverItems();
+    if (!carryover) return;
+    var currentItems = getBacklog(viewDate);
+    for (var i = 0; i < carryover.items.length; i++) {
+      if (currentItems.indexOf(carryover.items[i]) === -1) {
+        currentItems.push(carryover.items[i]);
+      }
+    }
+    saveBacklog(viewDate, currentItems);
+    dismissBacklogCarryover();
+    renderPlanView();
+  }
+
+  function renderBacklogCarryoverBanner() {
+    var viewDate = scheduleViewDate || todayStr();
+    if (!isFutureOrToday(viewDate) || isBacklogCarryoverDismissed()) {
+      backlogCarryoverBanner.classList.add('hidden');
+      return;
+    }
+    var carryover = getBacklogCarryoverItems();
+    if (!carryover) {
+      backlogCarryoverBanner.classList.add('hidden');
+      return;
+    }
+    var count = carryover.items.length;
+    var sourceLabel = formatDateLabel(carryover.date).toLowerCase();
+    backlogCarryoverMessage.textContent = count + ' uppgift' + (count !== 1 ? 'er' : '') +
+      ' kvar i att göra från ' + sourceLabel;
+    backlogCarryoverBanner.classList.remove('hidden');
+  }
+
+  btnBacklogCarryover.addEventListener('click', carryoverBacklogTasks);
+  btnBacklogCarryoverDismiss.addEventListener('click', dismissBacklogCarryover);
+
+  // ========================================
   // Projects & Tasks (Planera)
   // ========================================
   function renderPlanView() {
     updateScheduleDateNav();
     renderCarryoverBanner();
+    renderBacklogCarryoverBanner();
     renderBacklog();
     renderSchedule();
     renderProjects();
@@ -1091,7 +1168,19 @@
     backlogList.querySelectorAll('.btn-backlog-add').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        addToSchedule(btn.dataset.taskId, -1);
+        var taskId = btn.dataset.taskId;
+        var gridDate = scheduleViewDate || todayStr();
+        var schedule = getScheduleForDate(gridDate);
+        // Find last occurrence of this task in schedule to insert after it
+        var lastIdx = -1;
+        for (var i = 0; i < schedule.items.length; i++) {
+          if (schedule.items[i].taskId === taskId) lastIdx = i;
+        }
+        if (lastIdx >= 0) {
+          addPomodoroAfterSlot(taskId, lastIdx);
+        } else {
+          addToSchedule(taskId, -1);
+        }
         renderPlanView();
       });
     });
@@ -1551,7 +1640,8 @@
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
         var taskId = btn.dataset.taskId;
-        addToSchedule(taskId, -1);
+        var slotIdx = parseInt(btn.dataset.slotIdx);
+        addPomodoroAfterSlot(taskId, slotIdx);
         renderPlanView();
         if (isToday) updateTaskBanner();
       });
@@ -1803,6 +1893,35 @@
         schedule.items.push({ taskId: taskId, done: false });
       }
     }
+    saveScheduleForDate(gridDate, schedule);
+  }
+
+  // Add pomodoro right after a given slot index (first empty slot after it)
+  function addPomodoroAfterSlot(taskId, afterIdx) {
+    var gridDate = scheduleViewDate || todayStr();
+    var schedule = getScheduleForDate(gridDate);
+    var slotCount = getSlotCount();
+    while (schedule.items.length < slotCount) {
+      schedule.items.push({ taskId: null, done: false });
+    }
+    // Search for first empty slot after afterIdx
+    for (var i = afterIdx + 1; i < schedule.items.length; i++) {
+      if (!schedule.items[i].taskId) {
+        schedule.items[i] = { taskId: taskId, done: false };
+        saveScheduleForDate(gridDate, schedule);
+        return;
+      }
+    }
+    // Search before afterIdx if nothing found after
+    for (var i = 0; i <= afterIdx; i++) {
+      if (!schedule.items[i].taskId) {
+        schedule.items[i] = { taskId: taskId, done: false };
+        saveScheduleForDate(gridDate, schedule);
+        return;
+      }
+    }
+    // All full, append
+    schedule.items.push({ taskId: taskId, done: false });
     saveScheduleForDate(gridDate, schedule);
   }
 
