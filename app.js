@@ -1157,9 +1157,14 @@
     backlogList.querySelectorAll('.btn-backlog-remove').forEach(function (btn) {
       btn.addEventListener('click', function (e) {
         e.stopPropagation();
-        var blItems = getBacklog(gridDate);
-        blItems.splice(parseInt(btn.dataset.backlogIdx), 1);
-        saveBacklog(gridDate, blItems);
+        e.preventDefault();
+        var removeIdx = parseInt(btn.dataset.backlogIdx);
+        var currentDate = scheduleViewDate || todayStr();
+        var blItems = getBacklog(currentDate);
+        if (removeIdx >= 0 && removeIdx < blItems.length) {
+          blItems.splice(removeIdx, 1);
+          saveBacklog(currentDate, blItems);
+        }
         renderBacklog();
       });
     });
@@ -2388,16 +2393,20 @@
         }
       } else if (drag.type === 'backlog-to-schedule') {
         var targetSlotIdx = getSlotIdxAtPoint(clientX, clientY);
+        var placed = false;
         if (targetSlotIdx >= 0) {
           addToSchedule(drag.taskId, targetSlotIdx);
+          placed = true;
         } else {
           var scheduleRect = document.getElementById('schedule-section').getBoundingClientRect();
           var overSchedule = clientY >= scheduleRect.top - 40 && clientY <= scheduleRect.bottom + 40;
           if (overSchedule) {
             addToSchedule(drag.taskId, -1);
+            placed = true;
           }
         }
-        removeFromBacklog(drag.taskId);
+        // Only remove from backlog if actually placed in schedule
+        if (placed) removeFromBacklog(drag.taskId);
         renderPlanView();
       } else if (drag.type === 'slot-reorder') {
         var gridDate = scheduleViewDate || todayStr();
