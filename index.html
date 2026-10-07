@@ -2,174 +2,309 @@
 <html lang="sv">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#1a1a2e">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f5f2">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Pomodoro">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="icon.svg">
-  <title>Pomodoro Timer</title>
+  <title>Pomodoro</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div id="app">
-    <nav>
-      <button class="nav-btn active" data-view="timer">Timer</button>
-      <button class="nav-btn" data-view="plan">Planera</button>
-      <button class="nav-btn" data-view="stats">Statistik</button>
-      <button id="btn-theme-toggle" class="btn-theme-toggle" title="Byt tema">&#9789;</button>
+    <nav class="tabbar" aria-label="Huvudmeny">
+      <button class="tab" type="button" data-action="nav" data-view="overview">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16" rx="3"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg>
+        <span>Översikt</span>
+      </button>
+      <button class="tab" type="button" data-action="nav" data-view="projects">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V18a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        <span>Projekt</span>
+      </button>
+      <button class="tab" type="button" data-action="nav" data-view="focus">
+        <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M9.5 2.5h5"/></svg>
+        <span id="focus-tab-label">Fokus</span>
+      </button>
     </nav>
 
-    <!-- Timer View -->
-    <div id="timer-view" class="view active">
-      <div id="current-task-banner" class="hidden"></div>
-      <div id="session-label"></div>
-      <div id="timer-display">25:00</div>
-      <div id="timer-controls">
-        <button id="btn-start">Starta</button>
-        <button id="btn-pause" disabled>Pausa</button>
-        <button id="btn-reset">Nollst&auml;ll</button>
-      </div>
-      <div id="pomodoro-count"></div>
-      <div id="streak-counter"></div>
-      <div id="timer-schedule"></div>
-      <button id="btn-timer-add" class="btn-timer-add">+ L&auml;gg till</button>
-    </div>
-
-    <!-- Quick-add task modal (from timer) -->
-    <div id="quick-add-modal" class="modal hidden">
-      <div class="modal-content">
-        <h2>L&auml;gg till uppgift</h2>
-        <input type="text" id="quick-add-name" placeholder="Namn (valfritt)..." autocomplete="off">
-        <select id="quick-add-project"></select>
-        <button id="btn-quick-add-save">L&auml;gg till</button>
-      </div>
-    </div>
-
-    <!-- Log Activity Modal -->
-    <div id="log-modal" class="modal hidden">
-      <div class="modal-content">
-        <h2>Vad jobbade du med?</h2>
-        <input type="text" id="activity-input" placeholder="Skriv aktivitet..." autocomplete="off">
-        <div id="activity-suggestions"></div>
-        <button id="btn-save-activity">Spara</button>
-      </div>
-    </div>
-
-    <!-- Plan View -->
-    <div id="plan-view" class="view">
-      <!-- Today's schedule -->
-      <div id="schedule-section">
-        <div class="section-header">
-          <h2 id="schedule-heading">Dagens schema</h2>
-          <button id="btn-add-to-schedule" class="btn-icon">+</button>
+    <main id="main">
+      <header class="topbar">
+        <p id="view-kicker" class="topbar-kicker"></p>
+        <div class="topbar-actions">
+          <button class="btn btn-soft" type="button" data-action="share" title="Kopiera översikten för att diskutera den med Claude">
+            <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7.5 7.5 12 3l4.5 4.5"/><path d="M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+            <span>Dela</span>
+          </button>
+          <button class="icon-btn" type="button" data-action="settings" aria-label="Inställningar och säkerhetskopia">
+            <svg class="icon icon-fill" viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+          </button>
         </div>
-        <div id="schedule-date-nav">
-          <button id="schedule-prev">&larr;</button>
-          <span id="schedule-date-label">Idag</span>
-          <button id="schedule-next">&rarr;</button>
-        </div>
-        <div id="schedule-time-bar">
-          <span id="schedule-time-estimate"></span>
-          <label class="start-time-label">Start <input type="time" id="day-start-time" value="09:00"></label>
-        </div>
-        <div id="carryover-banner" class="carryover-banner hidden">
-          <div class="carryover-text">
-            <span class="carryover-icon">&#8631;</span>
-            <span id="carryover-message">Oavklarade uppgifter fr&aring;n ig&aring;r</span>
+        <h1 id="view-title">Översikt</h1>
+        <p id="view-subtitle" class="topbar-sub"></p>
+      </header>
+
+      <section id="view-overview" class="view" aria-labelledby="view-title"></section>
+      <section id="view-projects" class="view" aria-labelledby="view-title" hidden></section>
+
+      <section id="view-focus" class="view" aria-labelledby="view-title" hidden>
+        <div class="focus-layout">
+          <div class="focus-main">
+            <button id="focus-task" class="focus-task" type="button" data-action="pick-focus"></button>
+            <div class="timer" id="timer">
+              <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+                <circle class="ring-track" cx="60" cy="60" r="54"/>
+                <circle class="ring-progress" id="ring-progress" cx="60" cy="60" r="54" pathLength="100"/>
+              </svg>
+              <div class="timer-center">
+                <div class="timer-phase" id="timer-phase">Fokus</div>
+                <div class="timer-time" id="timer-time" role="timer" aria-live="off">25:00</div>
+                <div class="timer-sub" id="timer-sub"></div>
+              </div>
+            </div>
+            <div class="timer-controls">
+              <button class="icon-btn icon-btn-lg" type="button" data-action="timer-reset" aria-label="Nollställ">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3M4.5 4v4.5H9"/></svg>
+              </button>
+              <button class="btn-play" id="timer-toggle" type="button" data-action="timer-toggle" aria-label="Starta">
+                <svg class="icon icon-fill" id="timer-toggle-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>
+                <svg class="icon icon-fill" id="timer-toggle-pause" viewBox="0 0 24 24" aria-hidden="true" hidden><path d="M7.5 5h3.2v14H7.5zM13.3 5h3.2v14h-3.2z"/></svg>
+              </button>
+              <button class="icon-btn icon-btn-lg" id="timer-skip" type="button" data-action="timer-skip" aria-label="Hoppa över pausen">
+                <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5.5v13l9-6.5zM18 5v14"/></svg>
+              </button>
+            </div>
+            <div id="focus-finished" class="focus-finished" hidden></div>
           </div>
-          <div class="carryover-actions">
-            <button id="btn-carryover" class="btn-carryover">Flytta &ouml;ver</button>
-            <button id="btn-carryover-dismiss" class="btn-carryover-dismiss">&times;</button>
-          </div>
+          <div id="focus-stats" class="focus-stats"></div>
         </div>
-        <div id="schedule-list"></div>
-        <div id="schedule-empty" class="no-data">Dra uppgifter hit eller tryck +</div>
-      </div>
+      </section>
+    </main>
 
-      <hr class="divider">
-
-      <!-- Projects & tasks -->
-      <div id="projects-section">
-        <div class="section-header">
-          <h2>Projekt</h2>
-          <button id="btn-add-project" class="btn-icon">+</button>
-        </div>
-        <div id="projects-list"></div>
-      </div>
-    </div>
-
-    <!-- Add to schedule modal -->
-    <div id="schedule-modal" class="modal hidden">
-      <div class="modal-content">
-        <h2>L&auml;gg till i schema</h2>
-        <div id="schedule-picker"></div>
-        <button id="btn-close-picker" class="btn-secondary">St&auml;ng</button>
-      </div>
-    </div>
-
-    <!-- Add/Edit project modal -->
-    <div id="project-modal" class="modal hidden">
-      <div class="modal-content">
-        <h2 id="project-modal-title">Nytt projekt</h2>
-        <input type="text" id="project-name-input" placeholder="Projektnamn..." autocomplete="off">
-        <button id="btn-save-project">Spara</button>
-      </div>
-    </div>
-
-    <!-- Add task modal -->
-    <div id="task-modal" class="modal hidden">
-      <div class="modal-content">
-        <h2>Ny uppgift</h2>
-        <input type="text" id="task-name-input" placeholder="Uppgiftsnamn..." autocomplete="off">
-        <button id="btn-save-task">Spara</button>
-      </div>
-    </div>
-
-    <!-- Task detail modal -->
-    <div id="task-detail-modal" class="modal hidden">
-      <div class="modal-content">
-        <h2>Redigera uppgift</h2>
-        <input type="text" id="task-detail-name" placeholder="Uppgiftsnamn..." autocomplete="off">
-        <select id="task-detail-project"></select>
-        <textarea id="task-detail-desc" placeholder="Beskrivning (valfritt)..." rows="4"></textarea>
-        <select id="task-detail-recurring">
-          <option value="">Ej &aring;terkommande</option>
-          <option value="daily">Daglig</option>
-          <option value="weekly">Veckovis</option>
-        </select>
-        <button id="btn-save-task-detail">Spara</button>
-        <div id="task-swap-section" class="hidden">
-          <hr class="divider">
-          <h3 id="task-swap-heading">Byt uppgift</h3>
-          <div id="task-swap-list"></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Stats View -->
-    <div id="stats-view" class="view">
-      <div id="stats-tabs">
-        <button class="stats-tab active" data-period="day">Dag</button>
-        <button class="stats-tab" data-period="week">Vecka</button>
-        <button class="stats-tab" data-period="month">M&aring;nad</button>
-      </div>
-      <div id="stats-nav">
-        <button id="stats-prev">&larr;</button>
-        <span id="stats-period-label"></span>
-        <button id="stats-next">&rarr;</button>
-      </div>
-      <div id="stats-summary"></div>
-      <div id="stats-breakdown"></div>
-    </div>
+    <button class="fab" type="button" data-action="fab" aria-label="Lägg till uppgift">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
   </div>
 
-  <canvas id="confetti-canvas"></canvas>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <!-- Uppgift: lägg till / redigera -->
+  <dialog id="task-sheet" class="sheet" aria-labelledby="task-sheet-title">
+    <form id="task-form" class="sheet-body" novalidate>
+      <div class="sheet-head">
+        <h2 id="task-sheet-title">Ny uppgift</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Stäng">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <input id="task-name" class="input input-lg" type="text" placeholder="Vad behöver göras?" autocomplete="off" enterkeyhint="done" aria-label="Uppgift">
+      <div class="field">
+        <span class="field-label" id="task-when-label">När</span>
+        <div class="chips" id="task-date-chips" role="group" aria-labelledby="task-when-label">
+          <button type="button" class="chip" data-date="today">Idag</button>
+          <button type="button" class="chip" data-date="tomorrow">Imorgon</button>
+          <button type="button" class="chip" data-date="nextweek">Nästa vecka</button>
+          <button type="button" class="chip" data-date="none">Utan datum</button>
+        </div>
+        <div class="field-row">
+          <input id="task-date" class="input" type="date" aria-label="Datum">
+          <input id="task-time" class="input" type="time" aria-label="Tid (valfritt)">
+        </div>
+      </div>
+      <label class="field">
+        <span class="field-label">Projekt</span>
+        <select id="task-project" class="input"></select>
+      </label>
+      <p id="task-deadline-hint" class="hint" hidden></p>
+      <label class="field">
+        <span class="field-label">Upprepa</span>
+        <select id="task-recurring" class="input">
+          <option value="">Upprepas inte</option>
+          <option value="daily">Varje dag</option>
+          <option value="weekdays">Varje vardag (mån–fre)</option>
+          <option value="weekly">Varje vecka</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">Anteckningar</span>
+        <textarea id="task-notes" class="input" rows="3" placeholder="Valfritt"></textarea>
+      </label>
+      <div class="sheet-actions">
+        <button type="button" class="btn btn-danger-text" id="task-delete">Ta bort</button>
+        <span class="spacer"></span>
+        <button type="submit" class="btn btn-primary" id="task-submit">Lägg till</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Projekt: lägg till / redigera -->
+  <dialog id="project-sheet" class="sheet" aria-labelledby="project-sheet-title">
+    <form id="project-form" class="sheet-body" novalidate>
+      <div class="sheet-head">
+        <h2 id="project-sheet-title">Nytt projekt</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Stäng">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <input id="project-name" class="input input-lg" type="text" placeholder="Projektnamn" autocomplete="off" enterkeyhint="done" aria-label="Projektnamn">
+      <div class="field">
+        <span class="field-label">Deadline – när måste det vara klart?</span>
+        <div class="field-row">
+          <input id="project-deadline" class="input" type="date" aria-label="Deadline">
+          <button type="button" class="btn btn-soft" id="project-deadline-clear">Ingen</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-label" id="project-color-label">Färg</span>
+        <div class="swatches" id="project-colors" role="radiogroup" aria-labelledby="project-color-label"></div>
+      </div>
+      <label class="field">
+        <span class="field-label">Mål och anteckningar</span>
+        <textarea id="project-notes" class="input" rows="3" placeholder="Vad ska vara klart? (valfritt)"></textarea>
+      </label>
+      <div class="sheet-actions">
+        <button type="button" class="btn btn-danger-text" id="project-delete">Ta bort</button>
+        <button type="button" class="btn btn-soft" id="project-archive">Markera klart</button>
+        <span class="spacer"></span>
+        <button type="submit" class="btn btn-primary" id="project-submit">Skapa</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Dela med Claude -->
+  <dialog id="share-sheet" class="sheet sheet-wide" aria-labelledby="share-sheet-title">
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <h2 id="share-sheet-title">Diskutera med Claude</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Stäng">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <ol class="steps">
+        <li>Kopiera översikten och klistra in den i en chatt med Claude.</li>
+        <li>Prata igenom planen – vad som är viktigast, vad som hinns med före deadlines.</li>
+        <li>Be Claude om en uppdaterad plan och klistra in den under <b>Importera</b>.</li>
+      </ol>
+      <textarea id="share-text" class="input mono" rows="12" readonly aria-label="Översikt som text"></textarea>
+      <div class="sheet-actions">
+        <button type="button" class="btn btn-soft" data-action="open-import">Importera…</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-soft" id="share-native" hidden>Dela…</button>
+        <button type="button" class="btn btn-primary" id="share-copy">Kopiera</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Importera plan -->
+  <dialog id="import-sheet" class="sheet sheet-wide" aria-labelledby="import-sheet-title">
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <h2 id="import-sheet-title">Importera plan</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Stäng">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div id="import-edit">
+        <p class="muted">Klistra in planen som Claude skickat (hela svaret går bra – kodblocket plockas ut). Du ser ändringarna innan något sparas.</p>
+        <textarea id="import-text" class="input mono" rows="10" aria-label="Plan att importera" placeholder="## Kandidatuppsats | deadline 2026-12-15&#10;- [ ] 2026-10-08 Skriva metodavsnitt&#10;- [ ] 2026-10-10 14:00 Möte med handledare&#10;- [x] Välja ämne"></textarea>
+        <div class="sheet-actions">
+          <button type="button" class="btn btn-soft" id="import-paste" hidden>Klistra in</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-primary" id="import-preview-btn">Förhandsgranska</button>
+        </div>
+      </div>
+      <div id="import-review" hidden>
+        <div id="import-preview" class="import-preview"></div>
+        <div class="sheet-actions">
+          <button type="button" class="btn btn-soft" id="import-back">Tillbaka</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-primary" id="import-apply">Genomför</button>
+        </div>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Inställningar -->
+  <dialog id="settings-sheet" class="sheet" aria-labelledby="settings-sheet-title">
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <h2 id="settings-sheet-title">Inställningar</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Stäng">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="field">
+        <span class="field-label" id="theme-label">Tema</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="theme-label">
+          <label><input type="radio" name="theme" value="system"><span>System</span></label>
+          <label><input type="radio" name="theme" value="light"><span>Ljust</span></label>
+          <label><input type="radio" name="theme" value="dark"><span>Mörkt</span></label>
+        </div>
+      </div>
+      <div class="field-row">
+        <label class="field">
+          <span class="field-label">Fokuspass (min)</span>
+          <input id="setting-work" class="input" type="number" min="1" max="180" inputmode="numeric">
+        </label>
+        <label class="field">
+          <span class="field-label">Paus (min)</span>
+          <input id="setting-break" class="input" type="number" min="1" max="60" inputmode="numeric">
+        </label>
+      </div>
+      <div class="field">
+        <span class="field-label">Plan</span>
+        <div class="field-row">
+          <button type="button" class="btn btn-soft" data-action="share">Dela / kopiera</button>
+          <button type="button" class="btn btn-soft" data-action="open-import">Importera…</button>
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-label">Säkerhetskopia</span>
+        <div class="field-row">
+          <button type="button" class="btn btn-soft" id="backup-download">Ladda ner</button>
+          <button type="button" class="btn btn-soft" id="backup-restore">Återställ…</button>
+          <input type="file" id="backup-file" accept="application/json,.json" hidden>
+        </div>
+        <p class="hint">All data sparas bara i den här webbläsaren. Ladda ner en säkerhetskopia då och då.</p>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- Välj uppgift att fokusera på -->
+  <dialog id="pick-sheet" class="sheet" aria-labelledby="pick-sheet-title">
+    <div class="sheet-body">
+      <div class="sheet-head">
+        <h2 id="pick-sheet-title">Vad ska du fokusera på?</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Stäng">
+          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div id="pick-list" class="pick-list"></div>
+    </div>
+  </dialog>
+
+  <!-- Bekräfta -->
+  <dialog id="confirm-sheet" class="sheet sheet-small" aria-labelledby="confirm-text">
+    <div class="sheet-body">
+      <p id="confirm-text" class="confirm-text"></p>
+      <div class="sheet-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-soft" id="confirm-cancel">Avbryt</button>
+        <button type="button" class="btn btn-danger" id="confirm-ok">Ta bort</button>
+      </div>
+    </div>
+  </dialog>
+
+  <canvas id="confetti" aria-hidden="true"></canvas>
+
+  <script src="core.js"></script>
   <script src="app.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('sw.js');
+      navigator.serviceWorker.register('sw.js').catch(function () {});
     }
   </script>
 </body>

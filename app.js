@@ -1,558 +1,968 @@
 (function () {
   'use strict';
 
-  // --- Constants ---
-  var WORK_MINUTES = 25;
-  var BREAK_MINUTES = 5;
-  var WORK_SECONDS = WORK_MINUTES * 60;
-  var BREAK_SECONDS = BREAK_MINUTES * 60;
+  var C = window.PlanCore;
 
-  var PROJECT_COLORS = [
-    '#e94560', '#53a8b6', '#f0a500', '#a855f7',
-    '#34d399', '#f472b6', '#60a5fa', '#fb923c'
-  ];
+  var KEY = {
+    projects: 'pomodoro_projects',
+    tasks: 'pomodoro_tasks',
+    sessions: 'pomodoro_sessions',
+    version: 'pomodoro_version',
+    settings: 'pomodoro_settings',
+    timer: 'pomodoro_timer',
+    ui: 'pomodoro_ui',
+    v1Backup: 'pomodoro_v1_backup'
+  };
+  var DATA_VERSION = '2';
 
-  // --- Timer Worker (immune to background-tab throttling) ---
-  var timerWorker = null;
-  try {
-    var workerCode = 'var id=null;self.onmessage=function(e){if(e.data==="start"){if(id)clearInterval(id);id=setInterval(function(){self.postMessage("t")},250)}else if(e.data==="stop"){if(id){clearInterval(id);id=null}}};';
-    var blob = new Blob([workerCode], { type: 'application/javascript' });
-    timerWorker = new Worker(URL.createObjectURL(blob));
-  } catch (e) {
-    timerWorker = null; // fallback to setInterval if Workers unavailable
-  }
-
-  // --- State ---
-  var timeLeft = WORK_SECONDS;
-  var endTime = null; // wall-clock timestamp (ms) when timer expires
-  var isRunning = false;
-  var isBreak = false;
-  var intervalId = null;
-  var todayPomodoros = 0;
-  var activeScheduleIndex = -1; // which schedule item is active in timer
-  var addTaskToProjectId = null; // which project we're adding a task to
-  var scheduleViewDate = null; // null = today, otherwise a date string for history
-
-  // --- DOM Elements ---
-  var timerDisplay = document.getElementById('timer-display');
-  var sessionLabel = document.getElementById('session-label');
-  var btnStart = document.getElementById('btn-start');
-  var btnPause = document.getElementById('btn-pause');
-  var btnReset = document.getElementById('btn-reset');
-  var pomodoroCount = document.getElementById('pomodoro-count');
-  var currentTaskBanner = document.getElementById('current-task-banner');
-  var timerSchedule = document.getElementById('timer-schedule');
-  var logModal = document.getElementById('log-modal');
-  var activityInput = document.getElementById('activity-input');
-  var activitySuggestions = document.getElementById('activity-suggestions');
-  var btnSaveActivity = document.getElementById('btn-save-activity');
-  var navBtns = document.querySelectorAll('.nav-btn');
-  var views = document.querySelectorAll('.view');
-  var statsTabs = document.querySelectorAll('.stats-tab');
-  var statsPrev = document.getElementById('stats-prev');
-  var statsNext = document.getElementById('stats-next');
-  var statsPeriodLabel = document.getElementById('stats-period-label');
-  var statsSummary = document.getElementById('stats-summary');
-  var statsBreakdown = document.getElementById('stats-breakdown');
-
-  // Plan view elements
-  var btnAddProject = document.getElementById('btn-add-project');
-  var projectsList = document.getElementById('projects-list');
-  var btnAddToSchedule = document.getElementById('btn-add-to-schedule');
-  var scheduleList = document.getElementById('schedule-list');
-  var scheduleEmpty = document.getElementById('schedule-empty');
-  var scheduleHeading = document.getElementById('schedule-heading');
-  var scheduleDateNav = document.getElementById('schedule-date-nav');
-  var schedulePrev = document.getElementById('schedule-prev');
-  var scheduleNext = document.getElementById('schedule-next');
-  var scheduleDateLabel = document.getElementById('schedule-date-label');
-  var carryoverBanner = document.getElementById('carryover-banner');
-  var carryoverMessage = document.getElementById('carryover-message');
-  var btnCarryover = document.getElementById('btn-carryover');
-  var btnCarryoverDismiss = document.getElementById('btn-carryover-dismiss');
-
-  // Modals
-  var scheduleModal = document.getElementById('schedule-modal');
-  var schedulePicker = document.getElementById('schedule-picker');
-  var btnClosePicker = document.getElementById('btn-close-picker');
-  var projectModal = document.getElementById('project-modal');
-  var projectNameInput = document.getElementById('project-name-input');
-  var btnSaveProject = document.getElementById('btn-save-project');
-  var taskModal = document.getElementById('task-modal');
-  var taskNameInput = document.getElementById('task-name-input');
-  var btnSaveTask = document.getElementById('btn-save-task');
-
-  // ========================================
-  // Storage helpers
-  // ========================================
-  function getSessions() {
-    return JSON.parse(localStorage.getItem('pomodoro_sessions') || '[]');
-  }
-
-  function saveSessions(sessions) {
-    localStorage.setItem('pomodoro_sessions', JSON.stringify(sessions));
-  }
-
-  function getProjects() {
-    return JSON.parse(localStorage.getItem('pomodoro_projects') || '[]');
-  }
-
-  function saveProjects(projects) {
-    localStorage.setItem('pomodoro_projects', JSON.stringify(projects));
-  }
-
-  function getTasks() {
-    return JSON.parse(localStorage.getItem('pomodoro_tasks') || '[]');
-  }
-
-  function saveTasks(tasks) {
-    localStorage.setItem('pomodoro_tasks', JSON.stringify(tasks));
-  }
-
-  function todayStr() {
-    return new Date().toISOString().slice(0, 10);
-  }
-
-  function getScheduleHistory() {
-    return JSON.parse(localStorage.getItem('pomodoro_schedule_history') || '{}');
-  }
-
-  function saveScheduleHistory(history) {
-    localStorage.setItem('pomodoro_schedule_history', JSON.stringify(history));
-  }
-
-  function archiveSchedule(data) {
-    if (!data || !data.date || !data.items || data.items.length === 0) return;
-    var history = getScheduleHistory();
-    history[data.date] = data.items;
-    saveScheduleHistory(history);
-  }
-
-  // Migrate old format {taskId, pomodoros, completed} → new {taskId, done}
-  function migrateScheduleItems(items) {
-    if (!items || items.length === 0) return items;
-    if (typeof items[0].done !== 'undefined') return items;
-    var newItems = [];
-    for (var i = 0; i < items.length; i++) {
-      var poms = items[i].pomodoros || 1;
-      var completed = items[i].completed || 0;
-      for (var j = 0; j < poms; j++) {
-        newItems.push({ taskId: items[i].taskId, done: j < completed });
-      }
-    }
-    return newItems;
-  }
-
-  // Group flat items by taskId for plan view display
-  // Empty slots (taskId === null) are kept as individual entries
-  function groupScheduleItems(items) {
-    var groups = [];
-    var seen = {};
-    for (var i = 0; i < items.length; i++) {
-      var tid = items[i].taskId;
-      if (!tid) {
-        groups.push({ taskId: null, total: 1, completed: 0, flatIdx: i });
-        continue;
-      }
-      if (!seen[tid]) {
-        seen[tid] = { taskId: tid, total: 0, completed: 0 };
-        groups.push(seen[tid]);
-      }
-      seen[tid].total++;
-      if (items[i].done) seen[tid].completed++;
-    }
-    return groups;
-  }
-
-  function getSchedule() {
-    var data = JSON.parse(localStorage.getItem('pomodoro_schedule') || '{}');
-    if (data.date !== todayStr()) {
-      archiveSchedule(data);
-      return { date: todayStr(), items: [] };
-    }
-    data.items = migrateScheduleItems(data.items);
-    return data;
-  }
-
-  function getScheduleForDate(dateStr) {
-    if (dateStr === todayStr()) return getSchedule();
-    var history = getScheduleHistory();
-    return { date: dateStr, items: migrateScheduleItems(history[dateStr] || []) };
-  }
-
-  function saveSchedule(schedule) {
-    localStorage.setItem('pomodoro_schedule', JSON.stringify(schedule));
-    // Also keep history in sync for today
-    if (schedule.date === todayStr() && schedule.items.length > 0) {
-      var history = getScheduleHistory();
-      history[schedule.date] = schedule.items;
-      saveScheduleHistory(history);
-    }
-  }
-
-  function generateId() {
-    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  }
-
-  function getProjectColor(project) {
-    if (!project) return '#8888aa';
-    if (project.color) return project.color;
-    return PROJECT_COLORS[0];
-  }
-
-  function nextProjectColor() {
-    var projects = getProjects();
-    var usedColors = projects.map(function (p) { return p.color; }).filter(Boolean);
-    for (var i = 0; i < PROJECT_COLORS.length; i++) {
-      if (usedColors.indexOf(PROJECT_COLORS[i]) === -1) return PROJECT_COLORS[i];
-    }
-    return PROJECT_COLORS[projects.length % PROJECT_COLORS.length];
-  }
-
-  function getRecentActivities() {
-    var sessions = getSessions();
-    var seen = {};
-    var activities = [];
-    for (var i = sessions.length - 1; i >= 0; i--) {
-      var name = sessions[i].activity;
-      if (!seen[name]) {
-        seen[name] = true;
-        activities.push(name);
-      }
-    }
-    return activities;
+  function $(id) {
+    return document.getElementById(id);
   }
 
   // ========================================
-  // Timer
+  // Lagring
   // ========================================
-  function formatTime(seconds) {
-    var m = Math.floor(seconds / 60);
-    var s = seconds % 60;
-    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  function readRaw(key) {
+    try {
+      return localStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
   }
 
-  function updateDisplay() {
-    timerDisplay.textContent = formatTime(timeLeft);
-    document.title = formatTime(timeLeft) + (isBreak ? ' (Vila)' : ' (Arbete)');
+  function read(key, fallback) {
+    var raw = readRaw(key);
+    if (!raw) return fallback;
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+  }
 
-    if (isBreak) {
-      timerDisplay.classList.add('break-mode');
-      sessionLabel.textContent = 'Vila';
+  var storageWarned = false;
+  function write(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+      return true;
+    } catch (e) {
+      if (!storageWarned) {
+        storageWarned = true;
+        setTimeout(function () {
+          toast('Kunde inte spara – webbläsarens lagring är full eller blockerad.');
+        }, 0);
+      }
+      return false;
+    }
+  }
+
+  function today() {
+    return C.toDateStr(new Date());
+  }
+
+  function loadData() {
+    var raw = {
+      projects: read(KEY.projects, []),
+      tasks: read(KEY.tasks, []),
+      sessions: read(KEY.sessions, [])
+    };
+    if (readRaw(KEY.version) === DATA_VERSION) return C.normalizeData(raw);
+
+    // Första starten efter uppdateringen: spara en orörd kopia av den gamla
+    // datan och flytta över allt till den nya modellen.
+    if (readRaw(KEY.projects) || readRaw(KEY.tasks) || readRaw(KEY.sessions)) {
+      try {
+        localStorage.setItem(KEY.v1Backup, JSON.stringify({
+          savedAt: new Date().toISOString(),
+          projects: readRaw(KEY.projects),
+          tasks: readRaw(KEY.tasks),
+          sessions: readRaw(KEY.sessions),
+          schedule: readRaw('pomodoro_schedule'),
+          scheduleHistory: readRaw('pomodoro_schedule_history')
+        }));
+      } catch (e) { /* ingen plats – migreringen fortsätter ändå */ }
+    }
+    raw.schedule = read('pomodoro_schedule', null);
+    var migrated = C.migrateV1(raw, [today(), new Date().toISOString().slice(0, 10)], Date.now());
+    saveData(migrated);
+    try {
+      localStorage.setItem(KEY.version, DATA_VERSION);
+    } catch (e) { /* ignoreras */ }
+    return migrated;
+  }
+
+  function saveData(data) {
+    data = data || state;
+    write(KEY.projects, data.projects);
+    write(KEY.tasks, data.tasks);
+    write(KEY.sessions, data.sessions);
+  }
+
+  function clampInt(v, min, max, fallback) {
+    v = parseInt(v, 10);
+    if (isNaN(v)) return fallback;
+    return Math.min(max, Math.max(min, v));
+  }
+
+  function loadSettings() {
+    var s = read(KEY.settings, null) || {};
+    var oldTheme = readRaw('pomodoro_theme');
+    var theme = ['system', 'light', 'dark'].indexOf(s.theme) !== -1 ? s.theme
+      : (oldTheme === 'light' || oldTheme === 'dark' ? oldTheme : 'system');
+    return {
+      theme: theme,
+      workMin: clampInt(s.workMin, 1, 180, 25),
+      breakMin: clampInt(s.breakMin, 1, 60, 5)
+    };
+  }
+
+  function saveSettings() {
+    write(KEY.settings, settings);
+  }
+
+  function loadUi() {
+    var u = read(KEY.ui, null) || {};
+    return {
+      view: 'overview',
+      showSomeday: !!u.showSomeday,
+      showArchived: false,
+      expanded: u.expanded && typeof u.expanded === 'object' ? u.expanded : {},
+      showDone: {}
+    };
+  }
+
+  function saveUi() {
+    write(KEY.ui, { showSomeday: ui.showSomeday, expanded: ui.expanded });
+  }
+
+  var state = loadData();
+  var settings = loadSettings();
+  var ui = loadUi();
+
+  function projectById(id) {
+    if (!id) return null;
+    for (var i = 0; i < state.projects.length; i++) {
+      if (state.projects[i].id === id) return state.projects[i];
+    }
+    return null;
+  }
+
+  function taskIndex(id) {
+    for (var i = 0; i < state.tasks.length; i++) {
+      if (state.tasks[i].id === id) return i;
+    }
+    return -1;
+  }
+
+  function taskById(id) {
+    var i = id ? taskIndex(id) : -1;
+    return i === -1 ? null : state.tasks[i];
+  }
+
+  function clone(v) {
+    return JSON.parse(JSON.stringify(v));
+  }
+
+  function commit() {
+    saveData();
+    render();
+  }
+
+  // ========================================
+  // Hjälpare för HTML
+  // ========================================
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  var ICONS = {
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    play: '<path d="M8 5.5v13l10.5-6.5z"/>',
+    flag: '<path d="M5 21V4M5 4h12l-2.5 4.5L17 13H5"/>',
+    repeat: '<path d="M17 2.5l3 3-3 3M4 11.5v-1a5 5 0 0 1 5-5h11M7 21.5l-3-3 3-3M20 12.5v1a5 5 0 0 1-5 5H4"/>',
+    note: '<path d="M6 3.5h9l4 4v13H6z"/><path d="M9.5 12h6M9.5 16h4"/>',
+    timer: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M9.5 2.5h5"/>',
+    chevron: '<path d="M6 9l6 6 6-6"/>',
+    edit: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/>',
+    alert: '<path d="M12 4 2.8 19.5h18.4z"/><path d="M12 10v4M12 17v.01"/>',
+    copy: '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/>'
+  };
+  var FILLED = { play: true };
+
+  function icon(name, cls) {
+    return '<svg class="icon' + (FILLED[name] ? ' icon-fill' : '') + (cls ? ' ' + cls : '') +
+      '" viewBox="0 0 24 24" aria-hidden="true">' + ICONS[name] + '</svg>';
+  }
+
+  function plural(n, one, many) {
+    return n + ' ' + (n === 1 ? one : many);
+  }
+
+  // ========================================
+  // Element
+  // ========================================
+  var el = {
+    main: $('main'),
+    kicker: $('view-kicker'),
+    title: $('view-title'),
+    subtitle: $('view-subtitle'),
+    overview: $('view-overview'),
+    projects: $('view-projects'),
+    focus: $('view-focus'),
+    tabs: document.querySelectorAll('.tab'),
+    fab: document.querySelector('.fab'),
+    focusTabLabel: $('focus-tab-label'),
+    focusTab: document.querySelector('.tab[data-view="focus"]'),
+    toast: $('toast'),
+    // timer
+    timer: $('timer'),
+    timerTime: $('timer-time'),
+    timerPhase: $('timer-phase'),
+    timerSub: $('timer-sub'),
+    ring: $('ring-progress'),
+    timerToggle: $('timer-toggle'),
+    togglePlay: $('timer-toggle-play'),
+    togglePause: $('timer-toggle-pause'),
+    timerSkip: $('timer-skip'),
+    focusTask: $('focus-task'),
+    focusFinished: $('focus-finished'),
+    focusStats: $('focus-stats')
+  };
+
+  // ========================================
+  // Tema
+  // ========================================
+  function applyTheme() {
+    var root = document.documentElement;
+    if (settings.theme === 'system') root.removeAttribute('data-theme');
+    else root.setAttribute('data-theme', settings.theme);
+    var dark = settings.theme === 'dark' ||
+      (settings.theme === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    var meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', dark ? '#111114' : '#f6f5f2');
+  }
+
+  if (window.matchMedia) {
+    var mq = window.matchMedia('(prefers-color-scheme: dark)');
+    var onScheme = function () { if (settings.theme === 'system') applyTheme(); };
+    if (mq.addEventListener) mq.addEventListener('change', onScheme);
+    else if (mq.addListener) mq.addListener(onScheme);
+  }
+
+  // ========================================
+  // Toast med ångra
+  // ========================================
+  var toastTimer = null;
+
+  function toast(message, actionLabel, action) {
+    var t = el.toast;
+    t.innerHTML = '<span class="toast-msg"></span>' + (actionLabel ? '<button type="button"></button>' : '');
+    t.querySelector('.toast-msg').textContent = message;
+    if (actionLabel) {
+      var b = t.querySelector('button');
+      b.textContent = actionLabel;
+      b.addEventListener('click', function () {
+        hideToast();
+        action();
+      });
+    }
+    t.hidden = false;
+    t.style.animation = 'none';
+    void t.offsetHeight;
+    t.style.animation = '';
+    // Som popover hamnar toasten ovanpå öppna dialoger
+    if (t.showPopover) {
+      try {
+        if (t.matches(':popover-open')) t.hidePopover();
+        t.showPopover();
+      } catch (e) { /* ignoreras */ }
+    }
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, actionLabel ? 5500 : 3000);
+  }
+
+  function hideToast() {
+    clearTimeout(toastTimer);
+    el.toast.hidden = true;
+    if (el.toast.hidePopover) {
+      try { el.toast.hidePopover(); } catch (e) { /* ignoreras */ }
+    }
+  }
+
+  if (el.toast.showPopover) el.toast.setAttribute('popover', 'manual');
+
+  function haptic(pattern) {
+    try {
+      if (navigator.vibrate) navigator.vibrate(pattern || 8);
+    } catch (e) { /* ignoreras */ }
+  }
+
+  // ========================================
+  // Dialoger
+  // ========================================
+  function openDialog(d) {
+    if (d.open) return;
+    if (typeof d.showModal === 'function') d.showModal();
+    else d.setAttribute('open', '');
+  }
+
+  function closeDialog(d) {
+    if (!d.open) return;
+    if (typeof d.close === 'function') d.close();
+    else d.removeAttribute('open');
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('dialog'), function (d) {
+    var downOnBackdrop = false;
+    d.addEventListener('pointerdown', function (e) { downOnBackdrop = e.target === d; });
+    d.addEventListener('click', function (e) {
+      if (e.target === d && downOnBackdrop) closeDialog(d);
+      downOnBackdrop = false;
+    });
+    Array.prototype.forEach.call(d.querySelectorAll('[data-close]'), function (b) {
+      b.addEventListener('click', function () { closeDialog(d); });
+    });
+  });
+
+  function anyDialogOpen() {
+    return !!document.querySelector('dialog[open]');
+  }
+
+  var confirmSheet = $('confirm-sheet');
+  function confirmDialog(message, okLabel) {
+    return new Promise(function (resolve) {
+      $('confirm-text').textContent = message;
+      $('confirm-ok').textContent = okLabel || 'Ta bort';
+      var settled = false;
+      function done(v) {
+        if (settled) return;
+        settled = true;
+        $('confirm-ok').onclick = null;
+        $('confirm-cancel').onclick = null;
+        confirmSheet.removeEventListener('close', onClose);
+        closeDialog(confirmSheet);
+        resolve(v);
+      }
+      function onClose() { done(false); }
+      $('confirm-ok').onclick = function () { done(true); };
+      $('confirm-cancel').onclick = function () { done(false); };
+      confirmSheet.addEventListener('close', onClose);
+      openDialog(confirmSheet);
+      $('confirm-cancel').focus();
+    });
+  }
+
+  // ========================================
+  // Uppgifter
+  // ========================================
+  function toggleTask(id) {
+    var i = taskIndex(id);
+    if (i === -1) return;
+    var task = state.tasks[i];
+    var before = clone(task);
+    if (task.done) {
+      task.done = false;
+      task.doneAt = null;
+      commit();
+      return;
+    }
+    var updated = C.completeTask(task, today(), Date.now());
+    state.tasks[i] = updated;
+    haptic(12);
+    commit();
+    var undo = function () { restoreTask(before); };
+    if (updated.done) {
+      toast('Klart: ' + task.name, 'Ångra', undo);
+      celebrateIfDayDone();
     } else {
-      timerDisplay.classList.remove('break-mode');
-      sessionLabel.textContent = isRunning ? 'Arbete' : '';
+      toast('Klart! Nästa gång ' + C.formatShort(updated.date, today()), 'Ångra', undo);
     }
   }
 
-  function updateTaskBanner() {
-    var schedule = getSchedule();
-    if (schedule.items.length === 0) {
-      currentTaskBanner.classList.add('hidden');
-      activeScheduleIndex = -1;
-      renderTimerSchedule();
-      return;
-    }
-
-    // Find first not-done item (skip empty slots)
-    var idx = -1;
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (!schedule.items[i].done && schedule.items[i].taskId) {
-        idx = i;
-        break;
-      }
-    }
-
-    if (idx === -1) {
-      currentTaskBanner.innerHTML = '<span class="banner-done">Alla uppgifter klara!</span>';
-      currentTaskBanner.classList.remove('hidden');
-      activeScheduleIndex = -1;
-      renderTimerSchedule();
-      return;
-    }
-
-    activeScheduleIndex = idx;
-    var item = schedule.items[idx];
-    var tasks = getTasks();
-    var projects = getProjects();
-    var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
-    var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-
-    var projectName = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
-    var taskName = task ? task.name : 'Okänd uppgift';
-    // Compute progress for this task across all items
-    var totalForTask = 0, completedForTask = 0;
-    for (var j = 0; j < schedule.items.length; j++) {
-      if (schedule.items[j].taskId === item.taskId) {
-        totalForTask++;
-        if (schedule.items[j].done) completedForTask++;
-      }
-    }
-    var progress = completedForTask + '/' + totalForTask;
-    var color = getProjectColor(project);
-
-    currentTaskBanner.style.borderLeft = '4px solid ' + color;
-    currentTaskBanner.innerHTML =
-      '<span class="banner-project" style="color:' + color + '">' + escapeHtml(projectName) + '</span>' +
-      '<span class="banner-task">' + escapeHtml(taskName) + '</span>' +
-      '<span class="banner-progress">' + progress + '</span>';
-    currentTaskBanner.classList.remove('hidden');
-    renderTimerSchedule();
+  function restoreTask(snapshot, index) {
+    var i = taskIndex(snapshot.id);
+    if (i !== -1) state.tasks[i] = snapshot;
+    else if (typeof index === 'number') state.tasks.splice(Math.min(index, state.tasks.length), 0, snapshot);
+    else state.tasks.push(snapshot);
+    commit();
   }
 
-  function renderTimerSchedule() {
-    var schedule = getSchedule();
-    var tasks = getTasks();
-    var projects = getProjects();
+  function deleteTask(id) {
+    var i = taskIndex(id);
+    if (i === -1) return;
+    var removed = state.tasks.splice(i, 1)[0];
+    commit();
+    toast('Borttagen: ' + removed.name, 'Ångra', function () { restoreTask(removed, i); });
+  }
 
-    if (schedule.items.length === 0) {
-      timerSchedule.innerHTML = '';
+  function celebrateIfDayDone() {
+    var counts = C.buildAgenda(state, today()).counts;
+    if (counts.todayOpen === 0 && counts.overdue === 0 && counts.todayDone > 0) launchConfetti();
+  }
+
+  function playTask(id) {
+    var task = taskById(id);
+    if (!task) return;
+    timer.taskId = task.id;
+    if (timer.phase === 'work') timer.finishedTaskId = null;
+    saveTimer();
+    setView('focus');
+    if (timer.phase === 'work' && !timer.running) startTimer();
+  }
+
+  // ========================================
+  // Uppgiftsarket
+  // ========================================
+  var taskSheet = $('task-sheet');
+  var tf = {
+    form: $('task-form'),
+    title: $('task-sheet-title'),
+    name: $('task-name'),
+    date: $('task-date'),
+    time: $('task-time'),
+    project: $('task-project'),
+    recurring: $('task-recurring'),
+    notes: $('task-notes'),
+    chips: $('task-date-chips'),
+    hint: $('task-deadline-hint'),
+    del: $('task-delete'),
+    submit: $('task-submit')
+  };
+  var editingTaskId = null;
+
+  function chipDate(kind) {
+    var t = today();
+    if (kind === 'today') return t;
+    if (kind === 'tomorrow') return C.addDays(t, 1);
+    if (kind === 'nextweek') return C.addDays(C.startOfWeek(t), 7);
+    return '';
+  }
+
+  function updateTaskSheetState() {
+    var value = tf.date.value;
+    Array.prototype.forEach.call(tf.chips.querySelectorAll('.chip'), function (chip) {
+      chip.setAttribute('aria-pressed', String(chipDate(chip.dataset.date) === value));
+    });
+    tf.time.disabled = !value;
+    if (!value) tf.time.value = '';
+
+    var p = projectById(tf.project.value);
+    var t = today();
+    if (p && p.deadline) {
+      var late = value && value > p.deadline;
+      tf.hint.textContent = late
+        ? 'Datumet ligger efter projektets deadline (' + C.formatShort(p.deadline, t) + ').'
+        : 'Projektets deadline: ' + C.formatShort(p.deadline, t) + ' (' + C.formatRelative(p.deadline, t) + ').';
+      tf.hint.classList.toggle('is-warn', !!late);
+      tf.hint.hidden = false;
+    } else {
+      tf.hint.hidden = true;
+    }
+  }
+
+  function fillProjectSelect(select, currentId) {
+    var options = '<option value="">' + esc(C.NO_PROJECT_NAME) + ' (inget projekt)</option>';
+    C.sortProjects(state.projects).forEach(function (p) {
+      if (p.archived && p.id !== currentId) return;
+      options += '<option value="' + esc(p.id) + '">' + esc(p.name) + (p.archived ? ' (avslutat)' : '') + '</option>';
+    });
+    select.innerHTML = options;
+    select.value = currentId && projectById(currentId) ? currentId : '';
+  }
+
+  function openTaskSheet(opts) {
+    opts = opts || {};
+    var task = opts.id ? taskById(opts.id) : null;
+    editingTaskId = task ? task.id : null;
+    tf.title.textContent = task ? 'Redigera uppgift' : 'Ny uppgift';
+    tf.submit.textContent = task ? 'Spara' : 'Lägg till';
+    tf.del.hidden = !task;
+    tf.name.value = task ? task.name : '';
+    tf.date.value = task ? (task.date || '') : (opts.date != null ? opts.date : '');
+    tf.time.value = task && task.time ? task.time : '';
+    fillProjectSelect(tf.project, task ? task.projectId : (opts.projectId || null));
+    tf.recurring.value = task && task.recurring ? task.recurring : '';
+    tf.notes.value = task ? task.notes : '';
+    updateTaskSheetState();
+    openDialog(taskSheet);
+    if (!task) tf.name.focus();
+  }
+
+  tf.chips.addEventListener('click', function (e) {
+    var chip = e.target.closest('.chip');
+    if (!chip) return;
+    tf.date.value = chipDate(chip.dataset.date);
+    if (!tf.date.value) tf.recurring.value = '';
+    updateTaskSheetState();
+  });
+  tf.date.addEventListener('input', updateTaskSheetState);
+  tf.date.addEventListener('change', updateTaskSheetState);
+  tf.project.addEventListener('change', updateTaskSheetState);
+  tf.recurring.addEventListener('change', function () {
+    if (tf.recurring.value && !tf.date.value) {
+      tf.date.value = today();
+      updateTaskSheetState();
+    }
+  });
+
+  tf.form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var name = tf.name.value.trim();
+    if (!name) {
+      tf.name.focus();
       return;
     }
-
-    // Find current (first not-done) index
-    var currentIdx = -1;
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (!schedule.items[i].done) {
-        currentIdx = i;
-        break;
+    var date = C.isDateStr(tf.date.value) ? tf.date.value : null;
+    var recurring = tf.recurring.value || null;
+    if (recurring && !date) date = today();
+    var fields = {
+      name: name,
+      date: date,
+      time: date ? C.normalizeTime(tf.time.value) : null,
+      projectId: tf.project.value && projectById(tf.project.value) ? tf.project.value : null,
+      recurring: recurring,
+      notes: tf.notes.value.trim()
+    };
+    var isNew = !editingTaskId;
+    if (editingTaskId) {
+      var task = taskById(editingTaskId);
+      if (task) {
+        for (var k in fields) task[k] = fields[k];
       }
+    } else {
+      var nt = { id: C.uid(), done: false, doneAt: null, createdAt: Date.now() };
+      for (var f in fields) nt[f] = fields[f];
+      state.tasks.push(nt);
     }
+    closeDialog(taskSheet);
+    commit();
+    if (isNew) {
+      toast('Tillagd: ' + name + ' – ' + (date ? C.formatDayHeading(date, today()).toLowerCase() : 'utan datum'));
+    }
+  });
 
-    // Compute per-slot start times
-    var dayStart = getDayStartMinutes();
-    var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-    var nowInserted = false;
-    var html = '';
+  tf.del.addEventListener('click', function () {
+    var id = editingTaskId;
+    closeDialog(taskSheet);
+    if (id) deleteTask(id);
+  });
 
-    schedule.items.forEach(function (item, idx) {
-      var slotStart = dayStart + idx * (WORK_MINUTES + BREAK_MINUTES);
-      var slotEnd = slotStart + WORK_MINUTES;
+  // ========================================
+  // Projektarket
+  // ========================================
+  var projectSheet = $('project-sheet');
+  var pf = {
+    form: $('project-form'),
+    title: $('project-sheet-title'),
+    name: $('project-name'),
+    deadline: $('project-deadline'),
+    clear: $('project-deadline-clear'),
+    colors: $('project-colors'),
+    notes: $('project-notes'),
+    del: $('project-delete'),
+    archive: $('project-archive'),
+    submit: $('project-submit')
+  };
+  var editingProjectId = null;
+  var selectedColor = null;
 
-      // Insert "now" line before this slot if current time falls here
-      if (!nowInserted && nowMin < slotEnd && nowMin >= dayStart) {
-        html += '<div class="timeline-now"></div>';
-        nowInserted = true;
+  function renderSwatches() {
+    var colors = C.PROJECT_COLORS.slice();
+    if (selectedColor && colors.indexOf(selectedColor) === -1) colors.push(selectedColor);
+    pf.colors.innerHTML = colors.map(function (c, i) {
+      var on = c === selectedColor;
+      return '<button type="button" class="swatch" role="radio" style="--c:' + esc(c) + '" data-color="' + esc(c) +
+        '" aria-checked="' + on + '" aria-label="Färg ' + (i + 1) + '" tabindex="' + (on ? '0' : '-1') + '"></button>';
+    }).join('');
+  }
+
+  pf.colors.addEventListener('click', function (e) {
+    var sw = e.target.closest('.swatch');
+    if (!sw) return;
+    selectedColor = sw.dataset.color;
+    renderSwatches();
+    pf.colors.querySelector('[aria-checked="true"]').focus();
+  });
+
+  pf.colors.addEventListener('keydown', function (e) {
+    var dir = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 }[e.key];
+    if (!dir) return;
+    e.preventDefault();
+    var all = Array.prototype.slice.call(pf.colors.querySelectorAll('.swatch'));
+    var i = all.findIndex(function (s) { return s.dataset.color === selectedColor; });
+    selectedColor = all[(i + dir + all.length) % all.length].dataset.color;
+    renderSwatches();
+    pf.colors.querySelector('[aria-checked="true"]').focus();
+  });
+
+  function openProjectSheet(id) {
+    var p = id ? projectById(id) : null;
+    editingProjectId = p ? p.id : null;
+    pf.title.textContent = p ? 'Redigera projekt' : 'Nytt projekt';
+    pf.submit.textContent = p ? 'Spara' : 'Skapa';
+    pf.name.value = p ? p.name : '';
+    pf.deadline.value = p && p.deadline ? p.deadline : '';
+    pf.notes.value = p ? p.notes : '';
+    pf.del.hidden = !p;
+    pf.archive.hidden = !p;
+    pf.archive.textContent = p && p.archived ? 'Återaktivera' : 'Markera klart';
+    selectedColor = p ? p.color : C.nextColor(state.projects);
+    renderSwatches();
+    openDialog(projectSheet);
+    if (!p) pf.name.focus();
+  }
+
+  pf.clear.addEventListener('click', function () {
+    pf.deadline.value = '';
+  });
+
+  pf.form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var name = pf.name.value.trim();
+    if (!name) {
+      pf.name.focus();
+      return;
+    }
+    var fields = {
+      name: name,
+      deadline: C.isDateStr(pf.deadline.value) ? pf.deadline.value : null,
+      color: C.isColor(selectedColor) ? selectedColor : C.nextColor(state.projects),
+      notes: pf.notes.value.trim()
+    };
+    var id = editingProjectId;
+    if (id) {
+      var p = projectById(id);
+      if (p) {
+        for (var k in fields) p[k] = fields[k];
       }
+    } else {
+      id = C.uid();
+      var np = { id: id, archived: false, createdAt: Date.now() };
+      for (var f in fields) np[f] = fields[f];
+      state.projects.push(np);
+      ui.expanded[id] = true;
+      saveUi();
+    }
+    closeDialog(projectSheet);
+    commit();
+    if (!editingProjectId) {
+      if (ui.view === 'projects') flashProject(id);
+      else toast('Projektet ' + name + ' är skapat');
+    }
+  });
 
-      var timeLabel = formatMinutesAsTime(slotStart);
+  pf.archive.addEventListener('click', function () {
+    var p = projectById(editingProjectId);
+    if (!p) return;
+    p.archived = !p.archived;
+    closeDialog(projectSheet);
+    commit();
+    if (p.archived) {
+      toast(p.name + ' är klart', 'Ångra', function () {
+        p.archived = false;
+        commit();
+      });
+      launchConfetti();
+    }
+  });
 
-      // Empty slot
-      if (!item.taskId) {
-        html += '<div class="ts-item ts-empty" data-idx="' + idx + '">' +
-          '<div class="ts-item-inner">' +
-          '<span class="ts-time">' + timeLabel + '</span>' +
-          '<span class="ts-dot-empty"></span>' +
-          '<span class="ts-name ts-name-empty">Ledig</span>' +
-          '<button class="ts-remove-empty btn-tiny" data-idx="' + idx + '">&times;</button>' +
-          '</div>' +
-          '</div>';
+  pf.del.addEventListener('click', function () {
+    var p = projectById(editingProjectId);
+    if (!p) return;
+    var own = state.tasks.filter(function (t) { return t.projectId === p.id; });
+    var msg = own.length
+      ? 'Ta bort ' + p.name + ' och ' + plural(own.length, 'uppgift', 'uppgifter') + '?'
+      : 'Ta bort ' + p.name + '?';
+    confirmDialog(msg, 'Ta bort').then(function (ok) {
+      if (!ok) return;
+      var before = clone(state);
+      state.projects = state.projects.filter(function (x) { return x.id !== p.id; });
+      state.tasks = state.tasks.filter(function (t) { return t.projectId !== p.id; });
+      closeDialog(projectSheet);
+      commit();
+      toast('Borttaget: ' + p.name, 'Ångra', function () {
+        state.projects = before.projects;
+        state.tasks = before.tasks;
+        commit();
+      });
+    });
+  });
+
+  function flashProject(id) {
+    var card = $('proj-' + id);
+    if (!card) return;
+    card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    card.classList.remove('is-flash');
+    void card.offsetWidth;
+    card.classList.add('is-flash');
+  }
+
+  // ========================================
+  // Dela med Claude / importera
+  // ========================================
+  var shareSheet = $('share-sheet');
+  var shareText = $('share-text');
+  var shareCopy = $('share-copy');
+  var shareNative = $('share-native');
+
+  function openShare() {
+    shareText.value = C.exportText(state, today(), Date.now());
+    shareNative.hidden = !navigator.share;
+    shareCopy.textContent = 'Kopiera';
+    closeDialog($('settings-sheet'));
+    openDialog(shareSheet);
+    shareCopy.focus();
+    shareText.scrollTop = 0;
+  }
+
+  function copyFallback() {
+    shareText.focus();
+    shareText.select();
+    var ok = false;
+    try {
+      ok = document.execCommand('copy');
+    } catch (e) { /* ignoreras */ }
+    return ok;
+  }
+
+  shareCopy.addEventListener('click', function () {
+    var textValue = shareText.value;
+    function copied() {
+      shareCopy.textContent = 'Kopierat ✓';
+      haptic(10);
+      setTimeout(function () { shareCopy.textContent = 'Kopiera'; }, 2200);
+    }
+    function failed() {
+      if (copyFallback()) copied();
+      else toast('Kunde inte kopiera – markera texten och kopiera den själv.');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(textValue).then(copied, failed);
+    } else {
+      failed();
+    }
+  });
+
+  shareNative.addEventListener('click', function () {
+    navigator.share({ title: 'Min planering', text: shareText.value }).catch(function () {});
+  });
+
+  var importSheet = $('import-sheet');
+  var importText = $('import-text');
+  var importPaste = $('import-paste');
+  var importEdit = $('import-edit');
+  var importReview = $('import-review');
+  var importPreview = $('import-preview');
+  var importApply = $('import-apply');
+  var pendingImport = null;
+
+  function openImport() {
+    closeDialog(shareSheet);
+    closeDialog($('settings-sheet'));
+    pendingImport = null;
+    importEdit.hidden = false;
+    importReview.hidden = true;
+    importPaste.hidden = !(navigator.clipboard && navigator.clipboard.readText);
+    openDialog(importSheet);
+    importText.focus();
+  }
+
+  importPaste.addEventListener('click', function () {
+    navigator.clipboard.readText().then(function (txt) {
+      importText.value = txt;
+      importText.focus();
+    }, function () {
+      toast('Kunde inte läsa urklipp – klistra in i rutan i stället.');
+    });
+  });
+
+  $('import-preview-btn').addEventListener('click', function () {
+    var src = importText.value;
+    if (!src.trim()) {
+      importText.focus();
+      return;
+    }
+    var parsed = C.parsePlan(src);
+    var result = C.applyPlan(state, parsed, today(), Date.now());
+    pendingImport = result;
+    var real = result.changes.filter(function (c) { return c.type !== 'note'; });
+    var marks = { add: '+', change: '~', remove: '−', note: 'i', error: '!' };
+    var html = '<p class="import-summary">' + (real.length
+      ? plural(real.length, 'ändring', 'ändringar') + ' att genomföra:'
+      : 'Inga ändringar hittades.') + '</p>';
+    var items = result.changes.map(function (c) {
+      return '<li class="change-' + c.type + '"><span class="change-mark" aria-hidden="true">' + marks[c.type] +
+        '</span><span>' + esc(c.text) + '</span></li>';
+    });
+    parsed.errors.forEach(function (err) {
+      items.push('<li class="change-error"><span class="change-mark" aria-hidden="true">!</span><span>Hoppar över rad ' +
+        err.line + ': ' + esc(err.message) + ' – <code>' + esc(err.text) + '</code></span></li>');
+    });
+    if (items.length) html += '<ul>' + items.join('') + '</ul>';
+    importPreview.innerHTML = html;
+    importApply.disabled = !real.length;
+    importApply.textContent = real.length ? 'Genomför ' + plural(real.length, 'ändring', 'ändringar') : 'Inget att genomföra';
+    importEdit.hidden = true;
+    importReview.hidden = false;
+    $('import-back').focus();
+  });
+
+  $('import-back').addEventListener('click', function () {
+    importEdit.hidden = false;
+    importReview.hidden = true;
+    importText.focus();
+  });
+
+  importApply.addEventListener('click', function () {
+    if (!pendingImport) return;
+    var before = clone(state);
+    state = C.normalizeData(pendingImport.data);
+    pendingImport = null;
+    importText.value = '';
+    closeDialog(importSheet);
+    commit();
+    toast('Planen är uppdaterad', 'Ångra', function () {
+      state = before;
+      commit();
+    });
+  });
+
+  // ========================================
+  // Inställningar och säkerhetskopia
+  // ========================================
+  var settingsSheet = $('settings-sheet');
+  var settingWork = $('setting-work');
+  var settingBreak = $('setting-break');
+
+  function openSettings() {
+    Array.prototype.forEach.call(settingsSheet.querySelectorAll('input[name="theme"]'), function (r) {
+      r.checked = r.value === settings.theme;
+    });
+    settingWork.value = settings.workMin;
+    settingBreak.value = settings.breakMin;
+    openDialog(settingsSheet);
+  }
+
+  settingsSheet.addEventListener('change', function (e) {
+    if (e.target.name === 'theme') {
+      settings.theme = e.target.value;
+      applyTheme();
+      saveSettings();
+    } else if (e.target === settingWork || e.target === settingBreak) {
+      settings.workMin = clampInt(settingWork.value, 1, 180, settings.workMin);
+      settings.breakMin = clampInt(settingBreak.value, 1, 60, settings.breakMin);
+      settingWork.value = settings.workMin;
+      settingBreak.value = settings.breakMin;
+      saveSettings();
+      // Ett pass som inte har startats får den nya längden direkt
+      if (!timer.running && timer.remaining === timer.total) {
+        setPhase(timer.phase);
+        saveTimer();
+      }
+      render();
+    }
+  });
+
+  $('backup-download').addEventListener('click', function () {
+    var json = C.makeBackup(state, settings, Date.now());
+    var blob = new Blob([json], { type: 'application/json' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'pomodoro-sakerhetskopia-' + today() + '.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  });
+
+  var backupFile = $('backup-file');
+  $('backup-restore').addEventListener('click', function () {
+    backupFile.value = '';
+    backupFile.click();
+  });
+
+  backupFile.addEventListener('change', function () {
+    var file = backupFile.files && backupFile.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      var backup;
+      try {
+        backup = C.readBackup(String(reader.result));
+      } catch (e) {
+        toast(e instanceof SyntaxError ? 'Filen är ingen giltig JSON-fil.' : e.message);
         return;
       }
-
-      var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
-      var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-      var color = getProjectColor(project);
-      var isPast = nowMin >= slotEnd;
-
-      var cls = 'ts-item';
-      if (item.done) cls += ' ts-done';
-      else if (idx === currentIdx) cls += ' ts-current';
-      else if (isPast) cls += ' ts-past';
-      else cls += ' ts-upcoming';
-
-      var indicator = item.done
-        ? '<span class="ts-check">&check;</span>'
-        : '<span class="ts-dot" style="background:' + color + '"></span>';
-
-      var taskName = task ? task.name : 'Borttagen';
-      var addBtn = item.done ? '<button class="ts-add-pom btn-tiny" data-idx="' + idx + '">+</button>' : '';
-
-      // Action buttons for undone items
-      var pastBtns = '';
-      if (!item.done) {
-        if (isPast) {
-          pastBtns = '<button class="ts-mark-done btn-tiny" data-idx="' + idx + '" title="Markera klar">&check;</button>' +
-            '<button class="ts-mark-remove btn-tiny" data-idx="' + idx + '" title="Ta bort">&times;</button>';
-        } else {
-          pastBtns = '<button class="ts-mark-remove btn-tiny" data-idx="' + idx + '" title="Ta bort">&times;</button>';
-        }
-      }
-
-      html += '<div class="' + cls + '" data-idx="' + idx + '" data-task-id="' + (item.taskId || '') + '">' +
-        '<div class="ts-item-bg bg-done">Klar</div>' +
-        '<div class="ts-item-bg bg-remove">Ta bort</div>' +
-        '<div class="ts-item-inner">' +
-        '<span class="ts-time">' + timeLabel + '</span>' +
-        indicator +
-        '<span class="ts-name">' + escapeHtml(taskName) + '</span>' +
-        pastBtns +
-        addBtn +
-        '</div>' +
-        '</div>';
-    });
-
-    // "Now" line at end if not yet placed
-    if (!nowInserted && nowMin >= dayStart) {
-      html += '<div class="timeline-now"></div>';
-    }
-
-    timerSchedule.innerHTML = html;
-
-    // + button: add another pomodoro after this one
-    timerSchedule.querySelectorAll('.ts-add-pom').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        addPomodoroAfter(parseInt(btn.dataset.idx));
+      var d = backup.data;
+      confirmDialog('Ersätta allt i appen med säkerhetskopian (' + plural(d.projects.length, 'projekt', 'projekt') +
+        ', ' + plural(d.tasks.length, 'uppgift', 'uppgifter') + ')?', 'Återställ').then(function (ok) {
+        if (!ok) return;
+        var before = clone(state);
+        state = d;
+        closeDialog(settingsSheet);
+        commit();
+        toast('Säkerhetskopian är återställd', 'Ångra', function () {
+          state = before;
+          commit();
+        });
       });
-    });
+    };
+    reader.readAsText(file);
+  });
 
-    // Past item: mark done
-    timerSchedule.querySelectorAll('.ts-mark-done').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        haptic(12);
-        var schedule = getSchedule();
-        var i = parseInt(btn.dataset.idx);
-        if (i < schedule.items.length) {
-          schedule.items[i].done = true;
-          saveSchedule(schedule);
-          updateTaskBanner();
-          checkAllDoneConfetti();
-        }
-      });
-    });
-
-    // Remove item: past → empty slot, upcoming/current → splice
-    timerSchedule.querySelectorAll('.ts-mark-remove').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        haptic(12);
-        var schedule = getSchedule();
-        var i = parseInt(btn.dataset.idx);
-        if (i < schedule.items.length) {
-          var el = btn.closest('.ts-item');
-          if (el && el.classList.contains('ts-past')) {
-            schedule.items[i] = { taskId: null, done: false };
-          } else {
-            schedule.items.splice(i, 1);
-          }
-          saveSchedule(schedule);
-          updateTaskBanner();
-        }
-      });
-    });
-
-    // Remove empty slot buttons
-    timerSchedule.querySelectorAll('.ts-remove-empty').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        var schedule = getSchedule();
-        var i = parseInt(btn.dataset.idx);
-        if (i < schedule.items.length && !schedule.items[i].taskId) {
-          schedule.items.splice(i, 1);
-          saveSchedule(schedule);
-          updateTaskBanner();
-        }
-      });
-    });
-
-    // Timer schedule drag reorder + swipe gestures
-    timerSchedule.querySelectorAll('.ts-item:not(.ts-empty)').forEach(function (el) {
-      initTimerScheduleDrag(el);
-      if (!el.classList.contains('ts-done')) {
-        initTimerSwipe(el, parseInt(el.dataset.idx));
-      }
-    });
-  }
-
-  function addPomodoroAfter(idx) {
-    var schedule = getSchedule();
-    if (idx < 0 || idx >= schedule.items.length) return;
-    var taskId = schedule.items[idx].taskId;
-    schedule.items.splice(idx + 1, 0, { taskId: taskId, done: false });
-    saveSchedule(schedule);
-    updateTaskBanner();
-  }
-
-  function initTimerScheduleDrag(el) {
-    var idx = parseInt(el.dataset.idx);
-    var taskId = el.dataset.taskId;
-
-    function onStart(clientX, clientY, e) {
-      if (e.target.closest('.btn-tiny')) return;
-      drag.active = true;
-      drag.started = false;
-      drag.type = 'timer-reorder';
-      drag.sourceIdx = idx;
-      drag.taskId = taskId;
-      drag.sourceEl = el;
-      drag.startX = clientX;
-      drag.startY = clientY;
-    }
-
-    el.addEventListener('touchstart', function (e) {
-      if (e.touches.length !== 1) return;
-      var t = e.touches[0];
-      onStart(t.clientX, t.clientY, e);
-    }, { passive: true });
-
-    el.addEventListener('mousedown', function (e) {
-      if (e.button !== 0) return;
-      onStart(e.clientX, e.clientY, e);
-    });
-  }
-
-  function countTodayPomodoros() {
-    var sessions = getSessions();
-    var today = todayStr();
-    var count = 0;
-    for (var i = 0; i < sessions.length; i++) {
-      if (sessions[i].date === today) count++;
-    }
-    todayPomodoros = count;
-    updatePomodoroCount();
-  }
-
-  // --- Alarm sound (Web Audio API + <audio> fallback for background tabs) ---
+  // ========================================
+  // Ljud
+  // ========================================
   var audioCtx = null;
 
   function getAudioCtx() {
     if (!audioCtx) {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var Ctx = window.AudioContext || window.webkitAudioContext;
+      if (!Ctx) return null;
+      audioCtx = new Ctx();
     }
     return audioCtx;
   }
 
-  // Generate a tiny WAV file in memory for a sequence of tones
-  function generateWav(tones, sampleRate) {
-    sampleRate = sampleRate || 22050;
-    var totalSamples = 0;
-    tones.forEach(function (t) { totalSamples += Math.ceil((t.delay + t.duration) * sampleRate); });
-    // Use the longest tone end as total length
+  function unlockAudio() {
+    try {
+      var ctx = getAudioCtx();
+      if (ctx && ctx.state === 'suspended') ctx.resume();
+    } catch (e) { /* ignoreras */ }
+  }
+
+  // Liten WAV i minnet – <audio> fungerar även när fliken ligger i bakgrunden
+  function generateWav(tones) {
+    var sampleRate = 22050;
     var maxEnd = 0;
-    tones.forEach(function (t) { var end = t.delay + t.duration + 0.02; if (end > maxEnd) maxEnd = end; });
+    tones.forEach(function (t) { maxEnd = Math.max(maxEnd, t.delay + t.duration + 0.02); });
     var numSamples = Math.ceil(maxEnd * sampleRate);
     var samples = new Float32Array(numSamples);
-
     tones.forEach(function (t) {
-      var startSample = Math.floor(t.delay * sampleRate);
-      var durSamples = Math.ceil(t.duration * sampleRate);
-      for (var i = 0; i < durSamples; i++) {
-        var env = 1 - (i / durSamples); // linear fade out
-        if (i < sampleRate * 0.02) env *= i / (sampleRate * 0.02); // fade in
-        samples[startSample + i] += Math.sin(2 * Math.PI * t.freq * i / sampleRate) * t.volume * env;
+      var start = Math.floor(t.delay * sampleRate);
+      var dur = Math.ceil(t.duration * sampleRate);
+      for (var i = 0; i < dur && start + i < numSamples; i++) {
+        var env = 1 - i / dur;
+        if (i < sampleRate * 0.02) env *= i / (sampleRate * 0.02);
+        samples[start + i] += Math.sin(2 * Math.PI * t.freq * i / sampleRate) * t.volume * env;
       }
     });
-
-    // Encode as 16-bit PCM WAV
     var buffer = new ArrayBuffer(44 + numSamples * 2);
     var view = new DataView(buffer);
-    function writeStr(offset, s) { for (var i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i)); }
-    writeStr(0, 'RIFF');
+    function str(offset, s) {
+      for (var i = 0; i < s.length; i++) view.setUint8(offset + i, s.charCodeAt(i));
+    }
+    str(0, 'RIFF');
     view.setUint32(4, 36 + numSamples * 2, true);
-    writeStr(8, 'WAVE');
-    writeStr(12, 'fmt ');
+    str(8, 'WAVE');
+    str(12, 'fmt ');
     view.setUint32(16, 16, true);
     view.setUint16(20, 1, true);
     view.setUint16(22, 1, true);
@@ -560,1700 +970,865 @@
     view.setUint32(28, sampleRate * 2, true);
     view.setUint16(32, 2, true);
     view.setUint16(34, 16, true);
-    writeStr(36, 'data');
+    str(36, 'data');
     view.setUint32(40, numSamples * 2, true);
-    for (var i = 0; i < numSamples; i++) {
-      var s = Math.max(-1, Math.min(1, samples[i]));
-      view.setInt16(44 + i * 2, s * 0x7FFF, true);
+    for (var j = 0; j < numSamples; j++) {
+      var s = Math.max(-1, Math.min(1, samples[j]));
+      view.setInt16(44 + j * 2, s * 0x7fff, true);
     }
     return new Blob([buffer], { type: 'audio/wav' });
   }
 
-  // Pre-generate alarm WAV blobs so they're ready instantly
-  var alarmBlobs = {
-    work: generateWav([
+  var SOUNDS = {
+    work: [
       { freq: 660, duration: 0.18, delay: 0, volume: 0.5 },
       { freq: 880, duration: 0.18, delay: 0.2, volume: 0.5 },
       { freq: 1100, duration: 0.15, delay: 0.4, volume: 0.6 }
-    ]),
-    break: generateWav([
+    ],
+    break: [
       { freq: 520, duration: 0.14, delay: 0, volume: 0.4 },
       { freq: 680, duration: 0.14, delay: 0.15, volume: 0.4 }
-    ]),
-    start: generateWav([
+    ],
+    start: [
       { freq: 440, duration: 0.1, delay: 0, volume: 0.25 },
       { freq: 560, duration: 0.12, delay: 0.12, volume: 0.3 }
-    ])
+    ]
   };
-  var alarmUrls = {};
-  Object.keys(alarmBlobs).forEach(function (k) {
-    alarmUrls[k] = URL.createObjectURL(alarmBlobs[k]);
-  });
-
-  function playAlarm(type) {
-    playAlarmOnce(type);
-    setTimeout(function () { playAlarmOnce(type); }, 1500);
-    setTimeout(function () { playAlarmOnce(type); }, 3000);
-  }
-
-  function playAlarmOnce(type) {
-    // Primary: <audio> element — works reliably in background tabs
-    try {
-      var audio = new Audio(alarmUrls[type] || alarmUrls.work);
-      audio.play().catch(function () {});
-    } catch (e) { /* ignore */ }
-
-    // Secondary: Web Audio API — better quality when tab is in foreground
-    try {
-      var ctx = getAudioCtx();
-      if (ctx.state === 'suspended') {
-        ctx.resume().then(function () { playTones(ctx, type); });
-      } else {
-        playTones(ctx, type);
-      }
-    } catch (e) { /* ignore */ }
-  }
-
-  function playTones(ctx, type) {
-    if (type === 'work') {
-      playTone(ctx, 660, 0.18, 0, 0.25);
-      playTone(ctx, 880, 0.18, 0.2, 0.25);
-      playTone(ctx, 1100, 0.15, 0.4, 0.3);
-    } else if (type === 'start') {
-      playTone(ctx, 440, 0.1, 0, 0.12);
-      playTone(ctx, 560, 0.12, 0.12, 0.15);
-    } else {
-      playTone(ctx, 520, 0.14, 0, 0.2);
-      playTone(ctx, 680, 0.14, 0.15, 0.2);
-    }
-  }
-
-  function playTone(ctx, freq, duration, delay, volume) {
-    var osc = ctx.createOscillator();
-    var gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    var t = ctx.currentTime + delay;
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(volume, t + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + duration);
-    osc.start(t);
-    osc.stop(t + duration + 0.01);
-  }
-
-  function updatePomodoroCount() {
-    if (todayPomodoros > 0) {
-      pomodoroCount.textContent = todayPomodoros + ' pomodoro' + (todayPomodoros !== 1 ? 's' : '') + ' idag';
-    } else {
-      pomodoroCount.textContent = '';
-    }
-  }
-
-  function tick() {
-    timeLeft = Math.round((endTime - Date.now()) / 1000);
-    if (timeLeft < 0) {
-      if (timerWorker) timerWorker.postMessage('stop');
-      clearInterval(intervalId);
-      intervalId = null;
-      endTime = null;
-      isRunning = false;
-
-      if (isBreak) {
-        playAlarm('break');
-        isBreak = false;
-        timeLeft = WORK_SECONDS;
-        updateDisplay();
-        btnStart.textContent = 'Starta';
-        btnStart.disabled = false;
-        btnPause.disabled = true;
-        sessionLabel.textContent = '';
-        updateTaskBanner();
-      } else {
-        playAlarm('work');
-        timeLeft = 0;
-        updateDisplay();
-        btnPause.disabled = true;
-
-        // If schedule is active, auto-log
-        if (activeScheduleIndex >= 0) {
-          autoLogFromSchedule();
-        } else {
-          showLogModal();
-        }
-      }
-      return;
-    }
-    if (timeLeft !== lastTickDisplay) {
-      lastTickDisplay = timeLeft;
-      updateDisplay();
-    }
-  }
-
-  var lastTickDisplay = -1;
-
-  function autoLogFromSchedule() {
-    var schedule = getSchedule();
-    var item = schedule.items[activeScheduleIndex];
-    if (!item) {
-      showLogModal();
-      return;
-    }
-
-    var tasks = getTasks();
-    var projects = getProjects();
-    var task = tasks.filter(function (t) { return t.id === item.taskId; })[0];
-    var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-
-    var projLabel = project ? project.name : (task && task.projectId === null ? 'Övrigt' : '');
-    var activityName = (projLabel ? projLabel + ' — ' : '') + (task ? task.name : 'Okänd');
-
-    // Save session
-    var sessions = getSessions();
-    sessions.push({
-      activity: activityName,
-      duration: WORK_MINUTES,
-      date: todayStr(),
-      timestamp: Date.now()
+  var soundUrls = {};
+  try {
+    Object.keys(SOUNDS).forEach(function (k) {
+      soundUrls[k] = URL.createObjectURL(generateWav(SOUNDS[k]));
     });
-    saveSessions(sessions);
+  } catch (e) { /* inget ljud */ }
 
-    // Mark this pomodoro as done
-    item.done = true;
-    saveSchedule(schedule);
-
-    todayPomodoros++;
-    updatePomodoroCount();
-    updateStreakCounter();
-    checkAllDoneConfetti();
-    haptic(20);
-
-    // Start break
-    isBreak = true;
-    timeLeft = BREAK_SECONDS;
-    updateDisplay();
-    startTimer();
-  }
-
-  function startTimer() {
-    if (isRunning) return;
-    haptic(12);
-    // Unlock audio context on user gesture (required by mobile browsers)
+  function playSound(type) {
+    try {
+      if (soundUrls[type]) new Audio(soundUrls[type]).play().catch(function () {});
+    } catch (e) { /* ignoreras */ }
     try {
       var ctx = getAudioCtx();
-      if (ctx.state === 'suspended') ctx.resume();
-    } catch (e) { /* ignore */ }
-    // Play start sound (only for work sessions, not breaks)
-    if (!isBreak) playAlarm('start');
-    endTime = Date.now() + timeLeft * 1000;
-    isRunning = true;
-    btnStart.disabled = true;
-    btnPause.disabled = false;
-    // Use Web Worker for ticks (immune to background-tab throttling)
-    if (timerWorker) {
-      timerWorker.postMessage('start');
-    } else {
-      intervalId = setInterval(tick, 250);
-    }
-    updateDisplay();
+      if (!ctx) return;
+      var go = function () {
+        SOUNDS[type].forEach(function (t) {
+          var osc = ctx.createOscillator();
+          var gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.value = t.freq;
+          var at = ctx.currentTime + t.delay;
+          gain.gain.setValueAtTime(0, at);
+          gain.gain.linearRampToValueAtTime(t.volume / 2, at + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, at + t.duration);
+          osc.start(at);
+          osc.stop(at + t.duration + 0.01);
+        });
+      };
+      if (ctx.state === 'suspended') ctx.resume().then(go, function () {});
+      else go();
+    } catch (e) { /* ignoreras */ }
   }
 
-  function pauseTimer() {
-    if (!isRunning) return;
-    // Snapshot remaining time from wall clock
-    timeLeft = Math.max(0, Math.round((endTime - Date.now()) / 1000));
-    endTime = null;
-    isRunning = false;
-    if (timerWorker) {
-      timerWorker.postMessage('stop');
-    }
-    clearInterval(intervalId);
-    intervalId = null;
-    btnStart.disabled = false;
-    btnPause.disabled = true;
+  // Larmet spelas tre gånger så att det inte missas
+  function playAlarm(type) {
+    playSound(type);
+    setTimeout(function () { playSound(type); }, 1500);
+    setTimeout(function () { playSound(type); }, 3000);
   }
 
-  function resetTimer() {
-    pauseTimer();
-    isBreak = false;
-    endTime = null;
-    timeLeft = WORK_SECONDS;
-    btnStart.disabled = false;
-    btnStart.textContent = 'Starta';
-    sessionLabel.textContent = '';
-    updateDisplay();
+  // ========================================
+  // Timer
+  // ========================================
+  var worker = null;
+  try {
+    var workerSrc = 'var id=null;self.onmessage=function(e){if(e.data==="start"){if(id)clearInterval(id);' +
+      'id=setInterval(function(){self.postMessage("t")},250)}else if(e.data==="stop"){if(id){clearInterval(id);id=null}}};';
+    worker = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: 'application/javascript' })));
+    worker.onmessage = function () { tick(); };
+  } catch (e) {
+    worker = null;
+  }
+  var intervalId = null;
+
+  function phaseSeconds(phase) {
+    return (phase === 'work' ? settings.workMin : settings.breakMin) * 60;
   }
 
-  btnStart.addEventListener('click', startTimer);
-  btnPause.addEventListener('click', pauseTimer);
-  btnReset.addEventListener('click', resetTimer);
-
-  // Wire up Web Worker ticks
-  if (timerWorker) {
-    timerWorker.onmessage = function () {
-      if (isRunning) tick();
+  function loadTimer() {
+    var t = read(KEY.timer, null) || {};
+    var phase = t.phase === 'break' ? 'break' : 'work';
+    var total = typeof t.total === 'number' && t.total > 0 ? t.total : phaseSeconds(phase);
+    var running = !!t.running && typeof t.endTime === 'number';
+    return {
+      phase: phase,
+      total: total,
+      running: running,
+      endTime: running ? t.endTime : null,
+      remaining: typeof t.remaining === 'number' && t.remaining >= 0 ? Math.min(t.remaining, total) : total,
+      taskId: typeof t.taskId === 'string' ? t.taskId : null,
+      finishedTaskId: typeof t.finishedTaskId === 'string' ? t.finishedTaskId : null
     };
   }
 
-  // Catch up immediately when user returns to the tab
-  document.addEventListener('visibilitychange', function () {
-    if (!document.hidden && isRunning) tick();
-  });
+  var timer = loadTimer();
+  var timerSaved = true;
 
-  // ========================================
-  // Activity logging (fallback for no schedule)
-  // ========================================
-  function showLogModal() {
-    logModal.classList.remove('hidden');
-    activityInput.value = '';
-    renderSuggestions('');
-    activityInput.focus();
+  function saveTimer() {
+    timerSaved = write(KEY.timer, timer);
   }
 
-  function hideLogModal() {
-    logModal.classList.add('hidden');
+  function setPhase(phase) {
+    timer.phase = phase;
+    timer.total = phaseSeconds(phase);
+    timer.remaining = timer.total;
+    timer.running = false;
+    timer.endTime = null;
   }
 
-  function renderSuggestions(filter) {
-    var activities = getRecentActivities();
-    var lowerFilter = filter.toLowerCase();
-    activitySuggestions.innerHTML = '';
-
-    var filtered = activities.filter(function (a) {
-      return !filter || a.toLowerCase().indexOf(lowerFilter) !== -1;
-    });
-
-    filtered.forEach(function (name) {
-      var div = document.createElement('div');
-      div.className = 'suggestion';
-      div.textContent = name;
-      div.addEventListener('click', function () {
-        activityInput.value = name;
-        activitySuggestions.innerHTML = '';
-      });
-      activitySuggestions.appendChild(div);
-    });
+  function remaining() {
+    if (!timer.running) return timer.remaining;
+    return Math.max(0, Math.ceil((timer.endTime - Date.now()) / 1000));
   }
 
-  activityInput.addEventListener('input', function () {
-    renderSuggestions(activityInput.value);
-  });
-
-  btnSaveActivity.addEventListener('click', saveActivity);
-  activityInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') saveActivity();
-  });
-
-  function saveActivity() {
-    var name = activityInput.value.trim();
-    if (!name) return;
-
-    var sessions = getSessions();
-    sessions.push({
-      activity: name,
-      duration: WORK_MINUTES,
-      date: todayStr(),
-      timestamp: Date.now()
-    });
-    saveSessions(sessions);
-
-    hideLogModal();
-    todayPomodoros++;
-    updatePomodoroCount();
-    updateStreakCounter();
-    checkAllDoneConfetti();
-
-    isBreak = true;
-    timeLeft = BREAK_SECONDS;
-    updateDisplay();
-    startTimer();
+  function startTicking() {
+    if (worker) worker.postMessage('start');
+    else if (!intervalId) intervalId = setInterval(tick, 250);
   }
 
-  // ========================================
-  // Navigation
-  // ========================================
-  navBtns.forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var target = btn.dataset.view;
-      navBtns.forEach(function (b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-      views.forEach(function (v) { v.classList.remove('active'); });
-      document.getElementById(target + '-view').classList.add('active');
-      if (target === 'stats') renderStats();
-      if (target === 'plan') {
-        scheduleViewDate = null;
-        renderPlanView();
-      }
-      if (target === 'timer') updateTaskBanner();
-    });
-  });
-
-  // ========================================
-  // Task carryover from previous day
-  // ========================================
-  function getCarryoverItems() {
-    var history = getScheduleHistory();
-    var dates = Object.keys(history).filter(function (d) {
-      return d < todayStr() && history[d] && history[d].length > 0;
-    });
-    if (dates.length === 0) return null;
-    dates.sort();
-    var lastDate = dates[dates.length - 1];
-    var items = migrateScheduleItems(history[lastDate]);
-    var tasks = getTasks();
-    var taskIds = tasks.map(function (t) { return t.id; });
-    // Filter to only unfinished items whose tasks still exist
-    var unfinished = items.filter(function (item) {
-      return !item.done && taskIds.indexOf(item.taskId) !== -1;
-    });
-    if (unfinished.length === 0) return null;
-    return { date: lastDate, items: unfinished };
+  function stopTicking() {
+    if (worker) worker.postMessage('stop');
+    if (intervalId) {
+      clearInterval(intervalId);
+      intervalId = null;
+    }
   }
 
-  function isCarryoverDismissed() {
-    return localStorage.getItem('pomodoro_carryover_dismissed') === todayStr();
-  }
-
-  function dismissCarryover() {
-    localStorage.setItem('pomodoro_carryover_dismissed', todayStr());
-    carryoverBanner.classList.add('hidden');
-  }
-
-  function carryoverTasks() {
-    var carryover = getCarryoverItems();
-    if (!carryover) return;
-    var schedule = getSchedule();
-    var existingTaskIds = schedule.items.map(function (i) { return i.taskId; });
-    // Group carryover items by task to avoid duplicate tasks
-    var added = {};
-    for (var i = 0; i < carryover.items.length; i++) {
-      var item = carryover.items[i];
-      if (existingTaskIds.indexOf(item.taskId) === -1 || added[item.taskId]) {
-        schedule.items.push({ taskId: item.taskId, done: false });
-        added[item.taskId] = true;
-        // Track so we don't add same task from existingTaskIds check on next iteration
-        if (existingTaskIds.indexOf(item.taskId) === -1) {
-          existingTaskIds.push(item.taskId);
-        }
+  function suggestedTask() {
+    var agenda = C.buildAgenda(state, today());
+    for (var i = 0; i < agenda.sections.length; i++) {
+      var sec = agenda.sections[i];
+      if (sec.key !== 'overdue' && sec.key !== 'today') break;
+      for (var j = 0; j < sec.items.length; j++) {
+        var item = sec.items[j];
+        if (item.kind === 'task' && !item.done) return item.task;
       }
     }
-    saveSchedule(schedule);
-    dismissCarryover();
-    renderPlanView();
-    updateTaskBanner();
+    return null;
   }
 
-  function renderCarryoverBanner() {
-    var viewDate = scheduleViewDate || todayStr();
-    if (viewDate !== todayStr() || isCarryoverDismissed()) {
-      carryoverBanner.classList.add('hidden');
+  // Uppgiften som timern gäller: vald uppgift, annars förslag från idag
+  function focusTask() {
+    if (timer.taskId === '') return null;
+    var t = timer.taskId ? taskById(timer.taskId) : null;
+    if (t && (!t.done || (timer.running && timer.phase === 'work'))) return t;
+    return suggestedTask();
+  }
+
+  function startTimer() {
+    if (timer.running) return;
+    unlockAudio();
+    if (timer.phase === 'work') {
+      timer.finishedTaskId = null;
+      var t = focusTask();
+      if (timer.taskId !== '') timer.taskId = t ? t.id : null;
+      if (timer.remaining === timer.total) playSound('start');
+    }
+    timer.running = true;
+    timer.endTime = Date.now() + timer.remaining * 1000;
+    haptic(12);
+    saveTimer();
+    startTicking();
+    renderFocus();
+  }
+
+  function pauseTimer() {
+    if (!timer.running) return;
+    timer.remaining = remaining();
+    timer.running = false;
+    timer.endTime = null;
+    stopTicking();
+    saveTimer();
+    renderFocus();
+  }
+
+  function resetTimer() {
+    stopTicking();
+    setPhase('work');
+    timer.finishedTaskId = null;
+    saveTimer();
+    renderFocus();
+  }
+
+  function skipBreak() {
+    if (timer.phase !== 'break') return;
+    stopTicking();
+    setPhase('work');
+    saveTimer();
+    renderFocus();
+  }
+
+  function logSession(endedAt, seconds) {
+    var task = timer.taskId ? taskById(timer.taskId) : null;
+    var project = task ? projectById(task.projectId) : null;
+    var session = {
+      activity: (project ? project.name + ' — ' : '') + (task ? task.name : 'Fokus'),
+      duration: Math.max(1, Math.round(seconds / 60)),
+      date: C.toDateStr(new Date(endedAt)),
+      timestamp: endedAt
+    };
+    if (task) session.taskId = task.id;
+    if (project) session.projectId = project.id;
+    state.sessions.push(session);
+  }
+
+  // silent = passet tog slut medan appen var stängd
+  function finishPhase(silent) {
+    // En annan flik kan redan ha avslutat samma pass
+    var stored = read(KEY.timer, null);
+    if (timerSaved && stored && (stored.phase !== timer.phase || stored.endTime !== timer.endTime)) {
+      timer = loadTimer();
+      if (!timer.running) stopTicking();
+      state = loadData();
+      render();
       return;
     }
-    var carryover = getCarryoverItems();
-    if (!carryover) {
-      carryoverBanner.classList.add('hidden');
-      return;
-    }
-    // Build message with task count and source date
-    var taskIds = {};
-    for (var i = 0; i < carryover.items.length; i++) {
-      taskIds[carryover.items[i].taskId] = true;
-    }
-    var taskCount = Object.keys(taskIds).length;
-    var sourceLabel = formatDateLabel(carryover.date).toLowerCase();
-    carryoverMessage.textContent = taskCount + ' oavklarad' + (taskCount !== 1 ? 'e' : '') +
-      ' uppgift' + (taskCount !== 1 ? 'er' : '') + ' fr\u00e5n ' + sourceLabel;
-    carryoverBanner.classList.remove('hidden');
-  }
-
-  btnCarryover.addEventListener('click', carryoverTasks);
-  btnCarryoverDismiss.addEventListener('click', dismissCarryover);
-
-  // ========================================
-  // Projects & Tasks (Planera)
-  // ========================================
-  function renderPlanView() {
-    updateScheduleDateNav();
-    renderCarryoverBanner();
-    renderSchedule();
-    renderProjects();
-  }
-
-  function formatDateLabel(dateStr) {
-    var today = todayStr();
-    if (dateStr === today) return 'Idag';
-    var yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (dateStr === yesterday.toISOString().slice(0, 10)) return 'Ig\u00e5r';
-    var d = new Date(dateStr + 'T12:00:00');
-    return d.toLocaleDateString('sv-SE', { weekday: 'short', day: 'numeric', month: 'short' });
-  }
-
-  function getScheduleDates() {
-    var history = getScheduleHistory();
-    var dates = Object.keys(history).filter(function (d) { return (history[d] && history[d].length > 0); });
-    // Also include today if it has items
-    var schedule = getSchedule();
-    if (schedule.items.length > 0 && dates.indexOf(todayStr()) === -1) {
-      dates.push(todayStr());
-    }
-    dates.sort();
-    return dates;
-  }
-
-  function updateScheduleDateNav() {
-    var viewDate = scheduleViewDate || todayStr();
-    var isToday = viewDate === todayStr();
-
-    scheduleDateLabel.textContent = formatDateLabel(viewDate);
-
-    // Can always go back if there's history before current view
-    var dates = getScheduleDates();
-    var currentIdx = dates.indexOf(viewDate);
-
-    // Prev: enabled if there are dates before current, or if we're on today and there's any history
-    var hasPrev = false;
-    if (currentIdx > 0) {
-      hasPrev = true;
-    } else if (currentIdx === -1 && dates.length > 0) {
-      // viewDate is not in the list — check if there are dates before it
-      for (var i = 0; i < dates.length; i++) {
-        if (dates[i] < viewDate) { hasPrev = true; break; }
+    var endedAt = timer.endTime || Date.now();
+    if (timer.phase === 'work') {
+      logSession(endedAt, timer.total);
+      var finished = timer.taskId || null;
+      setPhase('break');
+      timer.finishedTaskId = finished;
+      var breakEnd = endedAt + timer.total * 1000;
+      if (breakEnd > Date.now()) {
+        timer.running = true;
+        timer.endTime = breakEnd;
+      } else {
+        setPhase('work');
+      }
+      if (!silent) {
+        playAlarm('work');
+        haptic([30, 60, 30]);
+      }
+    } else {
+      setPhase('work');
+      if (!silent) {
+        playAlarm('break');
+        haptic(30);
       }
     }
-    schedulePrev.disabled = !hasPrev;
-
-    // Next: enabled if we're viewing history and there are newer dates or we can go to today
-    scheduleNext.disabled = isToday;
-
-    // Show/hide editing controls based on whether viewing today
-    btnAddToSchedule.style.display = isToday ? '' : 'none';
-    scheduleHeading.textContent = isToday ? 'Dagens schema' : 'Schema';
-    document.getElementById('schedule-time-bar').style.display = isToday ? '' : 'none';
+    if (timer.running) startTicking();
+    else stopTicking();
+    saveTimer();
+    saveData();
+    render();
   }
 
-  // --- Projects ---
-  function renderProjects() {
-    var projects = getProjects();
-    var tasks = getTasks();
-    var schedule = getSchedule();
-    var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
-
-    if (projects.length === 0) {
-      projectsList.innerHTML = '<div class="no-data">Inga projekt &auml;nnu</div>';
+  function tick() {
+    if (!timer.running) return;
+    if (Date.now() >= timer.endTime) {
+      finishPhase(false);
       return;
     }
+    renderTimer();
+  }
 
-    projectsList.innerHTML = projects.map(function (proj, pIdx) {
-      var projTasks = tasks.filter(function (t) { return t.projectId === proj.id; });
-      var taskHtml = projTasks.map(function (task) {
-        var inSchedule = scheduledTaskIds.indexOf(task.id) !== -1;
-        var recurLabel = task.recurring ? (task.recurring === 'daily' ? 'daglig' : 'veckovis') : '';
-        return '<div class="task-item' + (inSchedule ? ' in-schedule' : '') + '" data-task-id="' + task.id + '">' +
-          '<button class="btn-edit-task btn-tiny" data-task-id="' + task.id + '">&#9998;</button>' +
-          '<span class="task-name">' + escapeHtml(task.name) + '</span>' +
-          (recurLabel ? '<span class="recurring-badge">' + recurLabel + '</span>' : '') +
-          (inSchedule ? '<span class="task-scheduled-badge">i schema</span>' : '') +
-          '<button class="btn-delete-task btn-tiny" data-task-id="' + task.id + '">&times;</button>' +
-          '</div>';
-      }).join('');
+  function formatClock(sec) {
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+  }
 
-      var color = getProjectColor(proj);
-      return '<div class="project-card" style="border-left:4px solid ' + color + '">' +
-        '<div class="project-header">' +
-        '<span class="project-name" style="color:' + color + '">' + escapeHtml(proj.name) + '</span>' +
-        '<div class="project-actions">' +
-        '<button class="btn-add-task btn-tiny" data-project-id="' + proj.id + '">+</button>' +
-        '<button class="btn-delete-project btn-tiny" data-project-id="' + proj.id + '">&times;</button>' +
-        '</div>' +
-        '</div>' +
-        '<div class="task-list">' + (taskHtml || '<div class="no-tasks">Inga uppgifter</div>') + '</div>' +
-        '</div>';
+  var lastTimerText = '';
+  function renderTimer() {
+    var rem = remaining();
+    var clock = formatClock(rem);
+    var active = timer.running || rem !== timer.total;
+    var label = active ? clock : 'Fokus';
+    if (el.focusTabLabel.textContent !== label) el.focusTabLabel.textContent = label;
+    el.focusTab.classList.toggle('is-running', timer.running);
+    el.focusTab.setAttribute('aria-label', active
+      ? 'Fokus, ' + (timer.phase === 'work' ? 'fokuspass' : 'paus') + ' ' + clock + (timer.running ? '' : ' (pausad)')
+      : 'Fokus');
+    document.title = timer.running ? clock + ' · ' + (timer.phase === 'work' ? 'Fokus' : 'Paus') : 'Pomodoro';
+
+    if (ui.view !== 'focus') return;
+    var stateKey = clock + timer.phase + timer.running;
+    if (stateKey === lastTimerText) return;
+    lastTimerText = stateKey;
+
+    var isBreak = timer.phase === 'break';
+    el.timerTime.textContent = clock;
+    el.timerPhase.textContent = isBreak ? 'Paus' : 'Fokus';
+    el.timer.classList.toggle('is-break', isBreak);
+    el.ring.style.strokeDashoffset = String(100 * (1 - rem / timer.total));
+    if (timer.running) {
+      var end = new Date(timer.endTime);
+      el.timerSub.textContent = (isBreak ? 'Paus till ' : 'Klar ') +
+        (end.getHours() < 10 ? '0' : '') + end.getHours() + ':' + (end.getMinutes() < 10 ? '0' : '') + end.getMinutes();
+    } else if (rem !== timer.total) {
+      el.timerSub.textContent = 'Pausad';
+    } else {
+      el.timerSub.textContent = isBreak ? settings.breakMin + ' min paus' : settings.workMin + ' min fokus';
+    }
+    // SVG-element saknar .hidden-egenskapen, så attributet sätts direkt
+    el.togglePlay.toggleAttribute('hidden', timer.running);
+    el.togglePause.toggleAttribute('hidden', !timer.running);
+    el.timerToggle.setAttribute('aria-label', timer.running ? 'Pausa' : (rem !== timer.total ? 'Fortsätt' : 'Starta'));
+    el.timerSkip.hidden = !isBreak;
+  }
+
+  // ========================================
+  // Rendering
+  // ========================================
+  function sessionCounts() {
+    var counts = {};
+    state.sessions.forEach(function (s) {
+      if (s.taskId) counts[s.taskId] = (counts[s.taskId] || 0) + 1;
+    });
+    return counts;
+  }
+
+  function urgencyPill(p, st, t) {
+    var label = st.daysLeft < 0 ? 'passerad' : C.formatRelative(p.deadline, t);
+    return '<span class="pill is-' + st.urgency + '">' + esc(label) + '</span>';
+  }
+
+  function taskRow(task, opts) {
+    var t = opts.today;
+    var p = projectById(task.projectId);
+    var color = p ? p.color : C.NO_PROJECT_COLOR;
+    var meta = [];
+    if (opts.showDate && task.date) {
+      var late = !task.done && task.date < t;
+      meta.push('<span class="' + (late ? 'meta-late' : '') + '">' + esc(C.formatShort(task.date, t)) + '</span>');
+    }
+    if (task.time) meta.push('<span class="meta-time">' + esc(task.time) + '</span>');
+    if (opts.showProject) {
+      meta.push('<span><i class="dot" style="--c:' + esc(color) + '"></i>' + esc(p ? p.name : C.NO_PROJECT_NAME) + '</span>');
+    }
+    if (opts.deadline && task.date && task.date > opts.deadline && !task.done) {
+      meta.push('<span class="meta-warn">' + icon('alert') + 'efter deadline</span>');
+    }
+    if (task.recurring) meta.push('<span>' + icon('repeat') + esc(C.RECURRING[task.recurring]) + '</span>');
+    if (task.notes) meta.push('<span title="Har anteckningar">' + icon('note') + '<span class="visually-hidden">anteckning</span></span>');
+    var n = opts.counts[task.id];
+    if (n) meta.push('<span title="Fokuspass">' + icon('timer') + n + '</span>');
+
+    var id = esc(task.id);
+    return '<li class="row' + (task.done ? ' is-done' : '') + '">' +
+      '<button type="button" class="check" style="--c:' + esc(color) + '" data-action="toggle-task" data-id="' + id +
+      '" aria-pressed="' + task.done + '" aria-label="Klar: ' + esc(task.name) + '">' +
+      '<span class="check-ring">' + icon('check') + '</span></button>' +
+      '<button type="button" class="row-main" data-action="open-task" data-id="' + id + '">' +
+      '<span class="row-title">' + esc(task.name) + '</span>' +
+      (meta.length ? '<span class="row-meta">' + meta.join('') + '</span>' : '') +
+      '</button>' +
+      (task.done ? '' : '<button type="button" class="icon-btn row-play" data-action="play-task" data-id="' + id +
+        '" aria-label="Fokusera på ' + esc(task.name) + '">' + icon('play') + '</button>') +
+      '</li>';
+  }
+
+  function deadlineRow(item, sec, t) {
+    var p = item.project;
+    var st = C.projectStats(p, state.tasks, t);
+    var meta = [];
+    if (sec.multiDay) meta.push('<span>' + esc(C.formatShort(item.date, t)) + '</span>');
+    meta.push('<span>' + esc(st.daysLeft < 0 ? 'passerad ' + C.formatRelative(p.deadline, t) : C.formatRelative(p.deadline, t)) + '</span>');
+    meta.push('<span>' + (st.total ? st.done + ' av ' + st.total + ' klara' : 'inga uppgifter') + '</span>');
+    return '<li class="row row-deadline" style="--c:' + esc(p.color) + '">' +
+      '<span class="flag">' + icon('flag') + '</span>' +
+      '<button type="button" class="row-main" data-action="goto-project" data-id="' + esc(p.id) + '">' +
+      '<span class="row-title">Deadline: <b>' + esc(p.name) + '</b></span>' +
+      '<span class="row-meta">' + meta.join('') + '</span></button></li>';
+  }
+
+  function sectionHtml(sec, t, counts, agendaCounts) {
+    var addDate = null;
+    if (sec.key === 'today') addDate = t;
+    else if (sec.key === 'tomorrow' || sec.key.indexOf('day:') === 0) addDate = sec.date;
+    var head = '<div class="sec-head"><h2 class="sec-title">' + esc(sec.title) + '</h2>' +
+      (sec.subtitle ? '<span class="sec-sub">' + esc(sec.subtitle) + '</span>' : '') +
+      (addDate ? '<button type="button" class="icon-btn sec-add" data-action="add-task" data-date="' + addDate +
+        '" aria-label="Lägg till uppgift ' + esc(sec.key === 'today' ? 'idag' : sec.title.toLowerCase()) + '">' +
+        icon('plus') + '</button>' : '') +
+      '</div>';
+    var rows = sec.items.map(function (item) {
+      if (item.kind === 'deadline') return deadlineRow(item, sec, t);
+      return taskRow(item.task, { today: t, showDate: sec.multiDay, showProject: true, counts: counts });
     }).join('');
-
-    // Event listeners
-    projectsList.querySelectorAll('.btn-add-task').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        addTaskToProjectId = btn.dataset.projectId;
-        taskNameInput.value = '';
-        taskModal.classList.remove('hidden');
-        taskNameInput.focus();
-      });
-    });
-
-    projectsList.querySelectorAll('.btn-delete-project').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        deleteProject(btn.dataset.projectId);
-      });
-    });
-
-    projectsList.querySelectorAll('.btn-delete-task').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        deleteTask(btn.dataset.taskId);
-      });
-    });
-
-    projectsList.querySelectorAll('.btn-edit-task').forEach(function (btn) {
-      btn.addEventListener('click', function (e) {
-        e.stopPropagation();
-        openTaskDetail(btn.dataset.taskId);
-      });
-    });
-
-    // Task items: tap to add to schedule, drag to schedule
-    projectsList.querySelectorAll('.task-item').forEach(function (el) {
-      initTaskDrag(el);
-    });
-  }
-
-  btnAddProject.addEventListener('click', function () {
-    projectNameInput.value = '';
-    projectModal.classList.remove('hidden');
-    projectNameInput.focus();
-  });
-
-  btnSaveProject.addEventListener('click', saveProject);
-  projectNameInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') saveProject();
-  });
-
-  function saveProject() {
-    var name = projectNameInput.value.trim();
-    if (!name) return;
-    var color = nextProjectColor();
-    var projects = getProjects();
-    projects.push({ id: generateId(), name: name, color: color });
-    saveProjects(projects);
-    projectModal.classList.add('hidden');
-    renderProjects();
-  }
-
-  function deleteProject(id) {
-    var projects = getProjects().filter(function (p) { return p.id !== id; });
-    saveProjects(projects);
-    // Also remove tasks belonging to project
-    var tasks = getTasks().filter(function (t) { return t.projectId !== id; });
-    saveTasks(tasks);
-    // Remove from schedule
-    var removedTaskIds = getTasks().filter(function (t) { return t.projectId === id; }).map(function (t) { return t.id; });
-    // tasks already filtered, so get original
-    var schedule = getSchedule();
-    schedule.items = schedule.items.filter(function (item) {
-      return removedTaskIds.indexOf(item.taskId) === -1;
-    });
-    saveSchedule(schedule);
-    renderPlanView();
-  }
-
-  // --- Tasks ---
-  btnSaveTask.addEventListener('click', saveTask);
-  taskNameInput.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') saveTask();
-  });
-
-  function saveTask() {
-    var name = taskNameInput.value.trim();
-    if (!name || !addTaskToProjectId) return;
-    var tasks = getTasks();
-    tasks.push({ id: generateId(), projectId: addTaskToProjectId, name: name });
-    saveTasks(tasks);
-    taskModal.classList.add('hidden');
-    addTaskToProjectId = null;
-    renderProjects();
-  }
-
-  function deleteTask(id) {
-    var tasks = getTasks().filter(function (t) { return t.id !== id; });
-    saveTasks(tasks);
-    // Remove from schedule
-    var schedule = getSchedule();
-    schedule.items = schedule.items.filter(function (item) { return item.taskId !== id; });
-    saveSchedule(schedule);
-    renderPlanView();
-  }
-
-  // --- Schedule date navigation ---
-  schedulePrev.addEventListener('click', function () {
-    var viewDate = scheduleViewDate || todayStr();
-    var dates = getScheduleDates();
-    // Find the closest date before current viewDate
-    var prevDate = null;
-    for (var i = dates.length - 1; i >= 0; i--) {
-      if (dates[i] < viewDate) { prevDate = dates[i]; break; }
+    if (sec.key === 'today') {
+      if (!sec.items.length) {
+        rows = '<li class="row-empty">Inget planerat idag. Tryck på + för att lägga till något.</li>';
+      } else if (agendaCounts.todayOpen === 0 && agendaCounts.todayDone > 0) {
+        rows = '<li class="row-empty is-celebrate">Allt klart för idag – snyggt jobbat!</li>' + rows;
+      }
     }
-    if (prevDate) {
-      scheduleViewDate = prevDate;
-      updateScheduleDateNav();
-      renderSchedule();
-    }
-  });
+    return '<section class="agenda-sec' + (sec.key === 'overdue' ? ' is-overdue' : '') + '">' + head +
+      '<ul class="rows">' + rows + '</ul></section>';
+  }
 
-  scheduleNext.addEventListener('click', function () {
-    var viewDate = scheduleViewDate || todayStr();
-    if (viewDate === todayStr()) return;
-    var dates = getScheduleDates();
-    // Find the closest date after current viewDate
-    var nextDate = null;
-    for (var i = 0; i < dates.length; i++) {
-      if (dates[i] > viewDate) { nextDate = dates[i]; break; }
+  function deadlinesHtml(t) {
+    var list = C.sortProjects(state.projects.filter(function (p) { return !p.archived && p.deadline; }));
+    var html = '<div class="panel-head"><h2 class="panel-title">Deadlines</h2>' +
+      '<button type="button" class="link-btn" data-action="nav" data-view="projects">Alla projekt</button></div>';
+    if (!list.length) {
+      return html + '<div class="dl-list"><div class="dl-empty">Inga deadlines ännu. Ge ett projekt en deadline så syns den här och i tidslinjen.' +
+        '<button type="button" class="link-btn" data-action="add-project">+ Nytt projekt</button></div></div>';
     }
-    // If no next date in history, go to today
-    if (!nextDate || nextDate >= todayStr()) {
-      scheduleViewDate = null;
+    return html + '<div class="dl-list">' + list.map(function (p) {
+      var st = C.projectStats(p, state.tasks, t);
+      var pct = st.total ? Math.round(st.done / st.total * 100) : 0;
+      return '<button type="button" class="dl-card" style="--c:' + esc(p.color) + '" data-action="goto-project" data-id="' + esc(p.id) + '">' +
+        '<span class="dl-top"><span class="dl-name">' + esc(p.name) + '</span>' + urgencyPill(p, st, t) + '</span>' +
+        '<span class="dl-sub"><span>' + esc(C.formatShort(p.deadline, t)) + '</span><span>' +
+        (st.total ? st.done + ' av ' + st.total + ' klara' : 'inga uppgifter än') + '</span></span>' +
+        '<span class="progress" aria-hidden="true"><span style="width:' + pct + '%"></span></span>' +
+        '</button>';
+    }).join('') + '</div>';
+  }
+
+  function renderOverview(t) {
+    var agenda = C.buildAgenda(state, t);
+    var counts = sessionCounts();
+    var html = '<div class="overview">';
+    html += '<aside class="overview-side" aria-label="Deadlines">' + deadlinesHtml(t) + '</aside>';
+    html += '<div class="overview-main">';
+    agenda.sections.forEach(function (sec) {
+      html += sectionHtml(sec, t, counts, agenda.counts);
+    });
+    if (agenda.someday.length) {
+      var open = ui.showSomeday;
+      html += '<section class="agenda-sec"><button type="button" class="sec-toggle" data-action="toggle-someday" aria-expanded="' + open + '">' +
+        '<span class="sec-title">Utan datum</span><span class="sec-count">' + agenda.someday.length + '</span>' +
+        icon('chevron', 'chev') + '</button>';
+      if (open) {
+        html += '<ul class="rows">' + agenda.someday.map(function (task) {
+          return taskRow(task, { today: t, showProject: true, counts: counts });
+        }).join('') + '</ul>';
+      }
+      html += '</section>';
+    }
+    html += '</div></div>';
+    el.overview.innerHTML = html;
+    return agenda;
+  }
+
+  function projectCard(p, t, counts, loose) {
+    var st = C.projectStats(p, state.tasks, t);
+    var key = loose ? '__none__' : p.id;
+    var open = !!ui.expanded[key];
+    var pct = st.total ? Math.round(st.done / st.total * 100) : 0;
+    var deadline = p.deadline
+      ? '<span>Deadline ' + esc(C.formatShort(p.deadline, t)) + '</span>' + urgencyPill(p, st, t)
+      : '<span>' + (loose ? 'Uppgifter utan projekt' : 'Ingen deadline') + '</span>';
+    var flags = [];
+    if (st.overdue) flags.push('<span class="meta-late">' + icon('alert') + st.overdue + ' ' + (st.overdue === 1 ? 'försenad' : 'försenade') + '</span>');
+    if (st.afterDeadline) flags.push('<span class="meta-warn">' + icon('alert') + st.afterDeadline + ' ' + (st.afterDeadline === 1 ? 'planerad' : 'planerade') + ' efter deadline</span>');
+    if (st.undated && p.deadline) flags.push('<span class="muted">' + st.undated + ' utan datum</span>');
+    var next = !open && st.next
+      ? '<span class="proj-next">Nästa: <b>' + esc(st.next.name) + '</b>' + (st.next.date ? ' · ' + esc(C.formatShort(st.next.date, t)) : '') + '</span>'
+      : '';
+
+    var html = '<article class="proj-card' + (p.archived ? ' is-archived' : '') + '" id="proj-' + esc(key) + '" style="--c:' + esc(p.color) + '">' +
+      '<div class="proj-top">' +
+      '<button type="button" class="proj-head" data-action="toggle-project" data-id="' + esc(key) + '" aria-expanded="' + open + '">' +
+      '<span class="dot"></span><span class="proj-name">' + esc(p.name) + '</span>' + icon('chevron', 'chev') +
+      '<span class="proj-info"><span class="proj-deadline">' + deadline + '</span>' +
+      '<span class="proj-progress"><span class="progress" aria-hidden="true"><span style="width:' + pct + '%"></span></span>' +
+      '<span>' + (st.total ? st.done + ' av ' + st.total + ' klara' : 'Inga uppgifter än') + '</span></span>' +
+      (flags.length ? '<span class="proj-flags">' + flags.join('') + '</span>' : '') + next +
+      '</span></button>' +
+      (loose ? '' : '<button type="button" class="icon-btn proj-edit" data-action="edit-project" data-id="' + esc(p.id) +
+        '" aria-label="Redigera ' + esc(p.name) + '">' + icon('edit') + '</button>') +
+      '</div>';
+
+    if (open) {
+      var own = state.tasks.filter(function (x) { return x.projectId === p.id; });
+      var openTasks = own.filter(function (x) { return !x.done; }).sort(C.compareTasks);
+      var doneTasks = own.filter(function (x) { return x.done; }).sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
+      var showDone = !!ui.showDone[key];
+      var rowOpts = { today: t, showDate: true, counts: counts, deadline: p.deadline };
+      html += '<div class="proj-body">' +
+        (p.notes ? '<p class="proj-notes">' + esc(p.notes) + '</p>' : '') +
+        (openTasks.length
+          ? '<ul class="rows">' + openTasks.map(function (x) { return taskRow(x, rowOpts); }).join('') + '</ul>'
+          : '<p class="row-empty">' + (doneTasks.length ? 'Allt är klart här!' : 'Inga uppgifter än.') + '</p>') +
+        (showDone && doneTasks.length
+          ? '<ul class="rows rows-done">' + doneTasks.map(function (x) { return taskRow(x, rowOpts); }).join('') + '</ul>'
+          : '') +
+        '<div class="proj-foot">' +
+        '<button type="button" class="btn btn-soft" data-action="add-task" data-project="' + esc(loose ? '' : p.id) + '">' +
+        icon('plus') + 'Lägg till uppgift</button>' +
+        (doneTasks.length ? '<button type="button" class="btn btn-soft" data-action="toggle-done" data-id="' + esc(key) + '">' +
+          (showDone ? 'Dölj klara' : 'Visa klara (' + doneTasks.length + ')') + '</button>' : '') +
+        '</div></div>';
+    }
+    return html + '</article>';
+  }
+
+  function renderProjects(t) {
+    var counts = sessionCounts();
+    var active = C.sortProjects(state.projects.filter(function (p) { return !p.archived; }));
+    var archived = state.projects.filter(function (p) { return p.archived; });
+    var loose = state.tasks.some(function (x) { return !x.projectId; });
+    var html = '<div class="proj-wrap">';
+    if (!active.length && !loose && !archived.length) {
+      html += '<div class="card empty-state"><h2>Inga projekt ännu</h2>' +
+        '<p>Skapa ett projekt för det du måste bli klar med – en kurs, en rapport, en flytt – och sätt en deadline.</p>' +
+        '<button type="button" class="btn btn-primary" data-action="add-project">' + icon('plus') + 'Nytt projekt</button></div>';
     } else {
-      scheduleViewDate = nextDate;
-    }
-    updateScheduleDateNav();
-    renderSchedule();
-  });
-
-  // --- Schedule ---
-  function renderSchedule() {
-    var viewDate = scheduleViewDate || todayStr();
-    var isToday = viewDate === todayStr();
-    var schedule = isToday ? getSchedule() : getScheduleForDate(viewDate);
-    var tasks = getTasks();
-    var projects = getProjects();
-    var groups = groupScheduleItems(schedule.items);
-
-    if (groups.length === 0) {
-      scheduleList.innerHTML = '';
-      scheduleEmpty.classList.remove('hidden');
-      scheduleEmpty.textContent = isToday ? 'Dra uppgifter hit eller tryck +' : 'Inget schema denna dag';
-      return;
-    }
-
-    scheduleEmpty.classList.add('hidden');
-
-    if (isToday) {
-      updateTimeEstimate();
-      // Compute timeline start times for each group
-      var dayStart = getDayStartMinutes();
-      var cumMin = dayStart;
-      var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
-      var nowInserted = false;
-
-      // Editable today view — grouped by task
-      var html = '';
-      groups.forEach(function (group, gIdx) {
-        var groupEndMin = cumMin + group.total * WORK_MINUTES + (group.total - 1) * BREAK_MINUTES;
-
-        // Insert "now" line before this group if appropriate
-        if (!nowInserted && nowMin < groupEndMin && nowMin >= dayStart) {
-          if (nowMin >= cumMin || gIdx === 0) {
-            html += '<div class="timeline-now"></div>';
-            nowInserted = true;
-          }
+      html += '<div class="proj-list">';
+      active.forEach(function (p) { html += projectCard(p, t, counts, false); });
+      if (loose) {
+        html += projectCard({ id: null, name: C.NO_PROJECT_NAME, color: C.NO_PROJECT_COLOR, deadline: null, notes: '', archived: false }, t, counts, true);
+      }
+      if (!active.length) {
+        html += '<div class="card empty-state"><p>Inga aktiva projekt.</p><button type="button" class="btn btn-primary" data-action="add-project">' +
+          icon('plus') + 'Nytt projekt</button></div>';
+      }
+      html += '</div>';
+      if (archived.length) {
+        html += '<section class="archived-toggle"><button type="button" class="sec-toggle" data-action="toggle-archived" aria-expanded="' + ui.showArchived + '">' +
+          '<span class="sec-title">Avslutade projekt</span><span class="sec-count">' + archived.length + '</span>' + icon('chevron', 'chev') + '</button>';
+        if (ui.showArchived) {
+          html += '<div class="proj-list">' + archived.map(function (p) { return projectCard(p, t, counts, false); }).join('') + '</div>';
         }
-
-        var timeLabel = formatMinutesAsTime(cumMin);
-
-        // Empty slot
-        if (!group.taskId) {
-          html += '<div class="schedule-item schedule-empty-slot" data-gidx="' + gIdx + '" data-flat-idx="' + group.flatIdx + '">' +
-            '<span class="schedule-time-label">' + timeLabel + '</span>' +
-            '<span class="schedule-empty-label">Ledig</span>' +
-            '<button class="btn-remove-empty-slot btn-tiny" data-flat-idx="' + group.flatIdx + '">&times;</button>' +
-            '</div>';
-          cumMin = groupEndMin + BREAK_MINUTES;
-          return;
-        }
-
-        var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
-        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-        var isDone = group.completed >= group.total;
-        var color = getProjectColor(project);
-
-        var recurring = task && task.recurring;
-        var recurBadge = recurring ? '<span class="recurring-badge">' + (recurring === 'daily' ? 'daglig' : 'veckovis') + '</span>' : '';
-        var playBtn = isDone ? '' : '<button class="btn-play-task" data-task-id="' + group.taskId + '" title="Starta">&#9654;</button>';
-
-        html += '<div class="schedule-item' + (isDone ? ' done' : '') + '" data-task-id="' + group.taskId + '" data-gidx="' + gIdx + '" style="border-left:4px solid ' + color + '">' +
-          '<span class="schedule-time-label">' + timeLabel + '</span>' +
-          '<span class="schedule-drag-handle">&#9776;</span>' +
-          '<div class="schedule-item-body">' +
-          '<div class="schedule-item-info">' +
-          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + recurBadge + '</span>' +
-          '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
-          '</div>' +
-          '</div>' +
-          '<div class="schedule-item-controls">' +
-          playBtn +
-          '<button class="btn-pom-minus btn-tiny" data-task-id="' + group.taskId + '">&minus;</button>' +
-          '<span class="schedule-pom-count">' + group.completed + '/' + group.total + '</span>' +
-          '<button class="btn-pom-plus btn-tiny" data-task-id="' + group.taskId + '">+</button>' +
-          '<button class="btn-remove-schedule btn-tiny" data-task-id="' + group.taskId + '">&times;</button>' +
-          '</div>' +
-          '</div>';
-
-        cumMin = groupEndMin + BREAK_MINUTES; // break between groups
-      });
-
-      // Insert "now" line at end if not yet inserted
-      if (!nowInserted && nowMin >= dayStart) {
-        html += '<div class="timeline-now"></div>';
+        html += '</section>';
       }
-
-      scheduleList.innerHTML = html;
-
-      // Event listeners
-      scheduleList.querySelectorAll('.btn-pom-minus').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          changePomCount(btn.dataset.taskId, -1);
-        });
-      });
-      scheduleList.querySelectorAll('.btn-pom-plus').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          changePomCount(btn.dataset.taskId, 1);
-        });
-      });
-      scheduleList.querySelectorAll('.btn-remove-schedule').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          removeScheduleItem(btn.dataset.taskId);
-        });
-      });
-      scheduleList.querySelectorAll('.btn-play-task').forEach(function (btn) {
-        btn.addEventListener('click', function (e) {
-          e.stopPropagation();
-          playTask(btn.dataset.taskId);
-        });
-      });
-      scheduleList.querySelectorAll('.btn-remove-empty-slot').forEach(function (btn) {
-        btn.addEventListener('click', function () {
-          var schedule = getSchedule();
-          var fi = parseInt(btn.dataset.flatIdx);
-          if (fi < schedule.items.length && !schedule.items[fi].taskId) {
-            schedule.items.splice(fi, 1);
-            saveSchedule(schedule);
-            renderPlanView();
-            updateTaskBanner();
-          }
-        });
-      });
-
-      // Whole schedule items are draggable (skip empty slots)
-      scheduleList.querySelectorAll('.schedule-item:not(.schedule-empty-slot)').forEach(function (item) {
-        initScheduleDrag(item);
-      });
-    } else {
-      // Read-only history view — grouped
-      scheduleList.innerHTML = groups.map(function (group) {
-        var task = tasks.filter(function (t) { return t.id === group.taskId; })[0];
-        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-        var isDone = group.completed >= group.total;
-
-        var color = getProjectColor(project);
-        return '<div class="schedule-item history-item' + (isDone ? ' done' : '') + '" style="border-left:4px solid ' + color + '">' +
-          '<div class="schedule-item-body">' +
-          '<div class="schedule-item-info">' +
-          '<span class="schedule-project" style="color:' + color + '">' + escapeHtml(project ? project.name : (task && task.projectId === null ? 'Övrigt' : '')) + '</span>' +
-          '<span class="schedule-task">' + escapeHtml(task ? task.name : 'Borttagen') + '</span>' +
-          '</div>' +
-          '</div>' +
-          '<span class="schedule-pom-count">' + group.completed + '/' + group.total + '</span>' +
-          '</div>';
-      }).join('');
-
-      // Summary
-      var totalCompleted = 0, totalPomodoros = 0;
-      for (var i = 0; i < groups.length; i++) {
-        totalCompleted += groups[i].completed;
-        totalPomodoros += groups[i].total;
-      }
-      scheduleList.innerHTML += '<div class="schedule-history-summary">' +
-        totalCompleted + '/' + totalPomodoros + ' pomodoros avklarade' +
-        '</div>';
     }
+    el.projects.innerHTML = html + '</div>';
   }
 
-  function changePomCount(taskId, delta) {
-    var schedule = getSchedule();
-    if (delta > 0) {
-      // Add a new pomodoro after the last one for this task
-      var lastIdx = -1;
-      for (var i = schedule.items.length - 1; i >= 0; i--) {
-        if (schedule.items[i].taskId === taskId) { lastIdx = i; break; }
+  function renderFocus() {
+    lastTimerText = '';
+    var t = today();
+    var task = focusTask();
+    var p = task ? projectById(task.projectId) : null;
+    var label = timer.running && timer.phase === 'work' ? 'Jobbar med' : 'Fokusera på';
+    var name = task ? task.name : (timer.taskId === '' ? 'Inget specifikt' : 'Välj uppgift');
+    el.focusTask.innerHTML = (task ? '<i class="dot" style="--c:' + esc(p ? p.color : C.NO_PROJECT_COLOR) + '"></i>' : '') +
+      '<span class="focus-task-text"><span class="focus-task-label">' + label + '</span>' +
+      '<span class="focus-task-name">' + esc(name) + '</span></span>' + icon('chevron', 'chev');
+    el.focusTask.setAttribute('aria-label', label + ': ' + name + '. Byt uppgift');
+
+    var finished = timer.phase === 'break' && timer.finishedTaskId ? taskById(timer.finishedTaskId) : null;
+    if (timer.phase === 'break') {
+      var fh = '<p>Pass klart – dags för paus!</p>';
+      if (finished && !finished.done) {
+        fh += '<div class="field-row"><button type="button" class="btn btn-primary" data-action="finish-task" data-id="' + esc(finished.id) + '">' +
+          icon('check') + 'Markera klar</button>' +
+          '<button type="button" class="btn btn-soft" data-action="finish-dismiss">Inte klar än</button></div>';
       }
-      if (lastIdx >= 0) {
-        schedule.items.splice(lastIdx + 1, 0, { taskId: taskId, done: false });
-      }
+      el.focusFinished.innerHTML = fh;
+      el.focusFinished.hidden = false;
     } else {
-      // Remove last undone pomodoro for this task; if all done, remove last done
-      var total = 0;
-      for (var i = 0; i < schedule.items.length; i++) {
-        if (schedule.items[i].taskId === taskId) total++;
-      }
-      if (total <= 1) return; // Don't remove last one
-      var removeIdx = -1;
-      for (var i = schedule.items.length - 1; i >= 0; i--) {
-        if (schedule.items[i].taskId === taskId && !schedule.items[i].done) {
-          removeIdx = i;
+      el.focusFinished.hidden = true;
+    }
+
+    renderFocusStats(t);
+    renderTimer();
+  }
+
+  function renderFocusStats(t) {
+    var fs = C.focusStats(state, t, 7);
+    var html = '<div class="tiles">' +
+      '<div class="tile"><div class="tile-label">Idag</div><div class="tile-value">' + fs.todayCount + '</div><div class="tile-note">pass · ' +
+      C.formatMinutes(fs.todayMinutes) + '</div></div>' +
+      '<div class="tile"><div class="tile-label">Veckan</div><div class="tile-value">' + C.formatHours(fs.weekMinutes) + '</div><div class="tile-note">vecka ' + C.isoWeek(t) + '</div></div>' +
+      '<div class="tile"><div class="tile-label">I rad</div><div class="tile-value">' + fs.streak + '</div><div class="tile-note">' +
+      (fs.streak === 1 ? 'dag' : 'dagar') + '</div></div>' +
+      '</div>';
+
+    var max = Math.max.apply(null, fs.byDay.map(function (d) { return d.minutes; }));
+    // Direktetikett bara på idag och den första toppen – resten via tooltip
+    var peakDate = null;
+    fs.byDay.forEach(function (d) { if (max && d.minutes === max && !peakDate) peakDate = d.date; });
+    var total7 = fs.byDay.reduce(function (s, d) { return s + d.minutes; }, 0);
+    html += '<div class="chart-card"><h2 class="chart-title">Fokustid senaste 7 dagarna</h2>' +
+      '<p class="chart-sub">' + (total7 ? 'Totalt ' + C.formatMinutes(total7) : 'Inga pass ännu – starta ett pass så syns det här.') + '</p>';
+    html += '<div class="cols" role="list">';
+    fs.byDay.forEach(function (d) {
+      var h = max ? Math.round(d.minutes / max * 100) : 0;
+      var isToday = d.date === t;
+      var label = C.capitalize(C.formatShort(d.date, t)) + ': ' + (d.minutes ? C.formatMinutes(d.minutes) : 'inget');
+      var showValue = d.minutes && (isToday || d.date === peakDate);
+      html += '<div class="col' + (isToday ? ' is-today' : '') + '" role="listitem" tabindex="0" aria-label="' + esc(label) + '">' +
+        '<span class="col-tip" aria-hidden="true">' + esc(label) + '</span>' +
+        (showValue ? '<span class="col-value" aria-hidden="true">' + esc(C.formatHours(d.minutes)) + '</span>' : '') +
+        '<span class="col-bar" style="height:' + h + '%"></span></div>';
+    });
+    html += '</div><div class="col-labels" aria-hidden="true">' + fs.byDay.map(function (d) {
+      return '<span' + (d.date === t ? ' class="is-today"' : '') + '>' + (d.date === t ? 'idag' : C.WEEKDAYS_SHORT[C.weekdayOf(d.date)]) + '</span>';
+    }).join('') + '</div></div>';
+
+    html += '<div class="chart-card"><h2 class="chart-title">Per projekt den här veckan</h2>';
+    if (!fs.week.length) {
+      html += '<p class="chart-empty">Inga fokuspass den här veckan ännu.</p>';
+    } else {
+      var wmax = fs.week[0].minutes;
+      html += '<p class="chart-sub">Vecka ' + C.isoWeek(t) + '</p><div class="hbars">' + fs.week.map(function (w) {
+        return '<div class="hbar-row"><span class="hbar-name"><i class="dot" style="--c:' + esc(w.color) + '"></i><span>' + esc(w.name) + '</span></span>' +
+          '<span class="hbar-value">' + esc(C.formatMinutes(w.minutes)) + '</span>' +
+          '<span class="hbar-track" aria-hidden="true"><span class="hbar" style="--c:' + esc(w.color) + ';width:' + Math.max(2, Math.round(w.minutes / wmax * 100)) + '%"></span></span></div>';
+      }).join('') + '</div>';
+    }
+    html += '</div>';
+    el.focusStats.innerHTML = html;
+  }
+
+  function renderHeader(t, agenda) {
+    var kicker, title, sub;
+    if (ui.view === 'overview') {
+      var d = C.parseDate(t);
+      kicker = 'Vecka ' + C.isoWeek(t);
+      title = C.capitalize(C.WEEKDAYS[d.getDay()]) + ' ' + d.getDate() + ' ' + C.MONTHS[d.getMonth()];
+      var bits = [];
+      var c = agenda.counts;
+      if (c.todayOpen) bits.push(c.todayOpen + ' kvar idag');
+      else if (c.todayDone) bits.push('Allt klart idag');
+      else bits.push('Inget planerat idag');
+      if (c.overdue) bits.push(c.overdue + ' ' + (c.overdue === 1 ? 'försenad' : 'försenade'));
+      sub = bits.join(' · ');
+    } else if (ui.view === 'projects') {
+      var active = C.sortProjects(state.projects.filter(function (p) { return !p.archived; }));
+      var next = active.filter(function (p) { return p.deadline && p.deadline >= t; })[0];
+      kicker = plural(active.length, 'aktivt', 'aktiva');
+      title = 'Projekt';
+      sub = next ? 'Nästa deadline: ' + next.name + ' ' + C.formatRelative(next.deadline, t)
+        : 'Sätt en deadline på det som måste bli klart.';
+    } else {
+      kicker = 'Pomodoro';
+      title = 'Fokus';
+      sub = settings.workMin + ' min fokus · ' + settings.breakMin + ' min paus';
+    }
+    el.kicker.textContent = kicker;
+    el.title.textContent = title;
+    el.subtitle.textContent = sub;
+  }
+
+  var lastRenderDay = null;
+
+  function render() {
+    var t = today();
+    lastRenderDay = t;
+
+    // Behåll tangentbordsfokus på samma knapp efter omritning
+    var active = document.activeElement;
+    var focusKey = null;
+    if (active && el.main.contains(active) && active.dataset && active.dataset.action) {
+      focusKey = { action: active.dataset.action, id: active.dataset.id };
+    }
+
+    var agenda = null;
+    if (ui.view === 'overview') agenda = renderOverview(t);
+    else if (ui.view === 'projects') renderProjects(t);
+    else renderFocus();
+    renderHeader(t, agenda);
+    renderTimer();
+
+    if (focusKey) {
+      var candidates = el.main.querySelectorAll('[data-action="' + focusKey.action + '"]');
+      for (var i = 0; i < candidates.length; i++) {
+        if (candidates[i].dataset.id === focusKey.id) {
+          candidates[i].focus({ preventScroll: true });
           break;
         }
       }
-      if (removeIdx === -1) {
-        // All done — remove last done
-        for (var i = schedule.items.length - 1; i >= 0; i--) {
-          if (schedule.items[i].taskId === taskId) { removeIdx = i; break; }
-        }
-      }
-      if (removeIdx >= 0) schedule.items.splice(removeIdx, 1);
     }
-    saveSchedule(schedule);
-    renderPlanView();
   }
 
-  function removeScheduleItem(taskId) {
-    var schedule = getSchedule();
-    schedule.items = schedule.items.filter(function (item) { return item.taskId !== taskId; });
-    saveSchedule(schedule);
-    renderPlanView();
-  }
-
-  // --- Schedule picker ---
-  btnAddToSchedule.addEventListener('click', function () {
-    renderSchedulePicker();
-    scheduleModal.classList.remove('hidden');
-  });
-
-  btnClosePicker.addEventListener('click', function () {
-    scheduleModal.classList.add('hidden');
-    renderSchedule();
-  });
-
-  function renderSchedulePicker() {
-    var projects = getProjects();
-    var tasks = getTasks();
-    var schedule = getSchedule();
-    var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
-
-    if (projects.length === 0) {
-      schedulePicker.innerHTML = '<div class="no-data">Skapa ett projekt f&ouml;rst</div>';
-      return;
-    }
-
-    schedulePicker.innerHTML = projects.map(function (proj) {
-      var projTasks = tasks.filter(function (t) { return t.projectId === proj.id; });
-      if (projTasks.length === 0) return '';
-
-      var taskBtns = projTasks.map(function (task) {
-        var alreadyAdded = scheduledTaskIds.indexOf(task.id) !== -1;
-        return '<button class="picker-task' + (alreadyAdded ? ' added' : '') + '" data-task-id="' + task.id + '">' +
-          escapeHtml(task.name) +
-          (alreadyAdded ? ' &check;' : '') +
-          '</button>';
-      }).join('');
-
-      var color = getProjectColor(proj);
-      return '<div class="picker-project">' +
-        '<div class="picker-project-name" style="color:' + color + '">' + escapeHtml(proj.name) + '</div>' +
-        '<div class="picker-tasks">' + taskBtns + '</div>' +
-        '</div>';
-    }).join('');
-
-    schedulePicker.querySelectorAll('.picker-task:not(.added)').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        addToSchedule(btn.dataset.taskId);
-        renderSchedulePicker();
-      });
+  function setView(view) {
+    if (['overview', 'projects', 'focus'].indexOf(view) === -1) view = 'overview';
+    var changed = ui.view !== view;
+    ui.view = view;
+    el.overview.hidden = view !== 'overview';
+    el.projects.hidden = view !== 'projects';
+    el.focus.hidden = view !== 'focus';
+    Array.prototype.forEach.call(el.tabs, function (tab) {
+      if (tab.dataset.view === view) tab.setAttribute('aria-current', 'page');
+      else tab.removeAttribute('aria-current');
     });
-  }
-
-  function addToSchedule(taskId) {
-    var schedule = getSchedule();
-    // Don't add duplicates
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (schedule.items[i].taskId === taskId) return;
-    }
-    schedule.items.push({ taskId: taskId, done: false });
-    saveSchedule(schedule);
+    el.fab.hidden = view === 'focus';
+    el.fab.setAttribute('aria-label', view === 'projects' ? 'Nytt projekt' : 'Lägg till uppgift');
+    render();
+    if (changed) window.scrollTo(0, 0);
   }
 
   // ========================================
-  // Task detail modal
+  // Klick (en lyssnare för hela appen)
   // ========================================
-  var taskDetailModal = document.getElementById('task-detail-modal');
-  var taskDetailName = document.getElementById('task-detail-name');
-  var taskDetailProject = document.getElementById('task-detail-project');
-  var taskDetailDesc = document.getElementById('task-detail-desc');
-  var btnSaveTaskDetail = document.getElementById('btn-save-task-detail');
-  var taskSwapSection = document.getElementById('task-swap-section');
-  var taskSwapList = document.getElementById('task-swap-list');
-  var editingTaskId = null;
-  var editingTimerIdx = null; // non-null when editing from timer view
-
-  function openTaskDetail(taskId, timerIdx) {
-    var tasks = getTasks();
-    var task = tasks.filter(function (t) { return t.id === taskId; })[0];
-    if (!task) return;
-    editingTaskId = taskId;
-    editingTimerIdx = (timerIdx != null) ? timerIdx : null;
-    taskDetailName.value = task.name;
-    taskDetailDesc.value = task.description || '';
-    // Populate project dropdown
-    var projects = getProjects();
-    taskDetailProject.innerHTML = '<option value="">\u00d6vrigt</option>' +
-      projects.map(function (p) {
-        return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
-      }).join('');
-    taskDetailProject.value = task.projectId || '';
-    taskDetailRecurring.value = task.recurring || '';
-
-    // Show swap section only when editing from timer view
-    if (editingTimerIdx != null) {
-      taskSwapSection.classList.remove('hidden');
-      renderTaskSwapList(taskId);
-    } else {
-      taskSwapSection.classList.add('hidden');
+  document.addEventListener('click', function (e) {
+    var target = e.target.closest('[data-action]');
+    if (!target) return;
+    var action = target.dataset.action;
+    var id = target.dataset.id;
+    switch (action) {
+      case 'nav':
+        closeDialog(settingsSheet);
+        setView(target.dataset.view);
+        break;
+      case 'fab':
+        if (ui.view === 'projects') openProjectSheet(null);
+        else openTaskSheet({ date: today() });
+        break;
+      case 'add-task':
+        if (target.dataset.project !== undefined) openTaskSheet({ projectId: target.dataset.project || null, date: '' });
+        else openTaskSheet({ date: target.dataset.date || '' });
+        break;
+      case 'open-task':
+        openTaskSheet({ id: id });
+        break;
+      case 'toggle-task':
+        toggleTask(id);
+        break;
+      case 'play-task':
+        playTask(id);
+        break;
+      case 'add-project':
+        openProjectSheet(null);
+        break;
+      case 'edit-project':
+        openProjectSheet(id);
+        break;
+      case 'toggle-project':
+        ui.expanded[id] = !ui.expanded[id];
+        if (!ui.expanded[id]) delete ui.expanded[id];
+        saveUi();
+        render();
+        break;
+      case 'toggle-done':
+        ui.showDone[id] = !ui.showDone[id];
+        render();
+        break;
+      case 'toggle-archived':
+        ui.showArchived = !ui.showArchived;
+        render();
+        break;
+      case 'toggle-someday':
+        ui.showSomeday = !ui.showSomeday;
+        saveUi();
+        render();
+        break;
+      case 'goto-project':
+        ui.expanded[id] = true;
+        saveUi();
+        setView('projects');
+        flashProject(id);
+        break;
+      case 'share':
+        openShare();
+        break;
+      case 'open-import':
+        openImport();
+        break;
+      case 'settings':
+        openSettings();
+        break;
+      case 'pick-focus':
+        openPick();
+        break;
+      case 'pick':
+        timer.taskId = id || '';
+        saveTimer();
+        closeDialog(pickSheet);
+        renderFocus();
+        break;
+      case 'timer-toggle':
+        if (timer.running) pauseTimer();
+        else startTimer();
+        break;
+      case 'timer-reset':
+        resetTimer();
+        break;
+      case 'timer-skip':
+        skipBreak();
+        break;
+      case 'finish-task':
+        timer.finishedTaskId = null;
+        saveTimer();
+        toggleTask(id);
+        break;
+      case 'finish-dismiss':
+        timer.finishedTaskId = null;
+        saveTimer();
+        renderFocus();
+        break;
     }
+  });
 
-    taskDetailModal.classList.remove('hidden');
-    taskDetailName.focus();
-  }
+  // Snabbkommando på dator: N = ny uppgift
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'n' && e.key !== 'N') return;
+    if (e.metaKey || e.ctrlKey || e.altKey || anyDialogOpen()) return;
+    var tag = (e.target && e.target.tagName) || '';
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable)) return;
+    e.preventDefault();
+    if (ui.view === 'projects') openProjectSheet(null);
+    else openTaskSheet({ date: today() });
+  });
 
-  function renderTaskSwapList(currentTaskId) {
-    var tasks = getTasks();
-    var projects = getProjects();
+  // ========================================
+  // Välj fokusuppgift
+  // ========================================
+  var pickSheet = $('pick-sheet');
 
-    // Group tasks by project
+  function openPick() {
+    var t = today();
+    var agenda = C.buildAgenda(state, t);
+    var current = focusTask();
     var groups = [];
-    projects.forEach(function (p) {
-      var projTasks = tasks.filter(function (t) { return t.projectId === p.id && t.id !== currentTaskId; });
-      if (projTasks.length) groups.push({ name: p.name, color: getProjectColor(p), tasks: projTasks });
+    var soon = [];
+    agenda.sections.forEach(function (sec) {
+      var tasks = sec.items.filter(function (i) { return i.kind === 'task' && !i.done; }).map(function (i) { return i.task; });
+      if (!tasks.length) return;
+      if (sec.key === 'overdue' || sec.key === 'today' || sec.key === 'tomorrow') groups.push({ title: sec.title, tasks: tasks });
+      else soon = soon.concat(tasks);
     });
-    // Ungrouped tasks (Övrigt)
-    var loose = tasks.filter(function (t) { return !t.projectId && t.id !== currentTaskId; });
-    if (loose.length) groups.push({ name: 'Övrigt', color: '#8888aa', tasks: loose });
+    if (soon.length) groups.push({ title: 'Kommande', tasks: soon.slice(0, 15) });
+    if (agenda.someday.length) groups.push({ title: 'Utan datum', tasks: agenda.someday });
 
-    if (groups.length === 0) {
-      taskSwapList.innerHTML = '<div class="no-tasks">Inga andra uppgifter</div>';
-      return;
-    }
-
-    taskSwapList.innerHTML = groups.map(function (g) {
-      return '<div class="swap-group">' +
-        '<div class="swap-group-name" style="color:' + g.color + '">' + escapeHtml(g.name) + '</div>' +
-        g.tasks.map(function (t) {
-          return '<button class="swap-task-btn" data-task-id="' + t.id + '">' + escapeHtml(t.name) + '</button>';
-        }).join('') +
-        '</div>';
-    }).join('');
-
-    taskSwapList.querySelectorAll('.swap-task-btn').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        swapTimerTask(btn.dataset.taskId);
-      });
+    var html = '<div class="pick-group"><button type="button" class="pick-btn" data-action="pick" data-id=""' +
+      (timer.taskId === '' ? ' aria-current="true"' : '') + '><span class="row-title">Inget specifikt</span></button></div>';
+    groups.forEach(function (g) {
+      html += '<div class="pick-group"><h3>' + esc(g.title) + '</h3>' + g.tasks.map(function (task) {
+        var p = projectById(task.projectId);
+        return '<button type="button" class="pick-btn" data-action="pick" data-id="' + esc(task.id) + '"' +
+          (current && current.id === task.id ? ' aria-current="true"' : '') + '>' +
+          '<i class="dot" style="--c:' + esc(p ? p.color : C.NO_PROJECT_COLOR) + '"></i>' +
+          '<span><span class="row-title">' + esc(task.name) + '</span><span class="row-meta">' +
+          esc((p ? p.name : C.NO_PROJECT_NAME) + (task.date && g.title !== 'Idag' ? ' · ' + C.formatShort(task.date, t) : '')) +
+          '</span></span></button>';
+      }).join('') + '</div>';
     });
-  }
-
-  function swapTimerTask(newTaskId) {
-    if (editingTimerIdx == null) return;
-    var schedule = getSchedule();
-    if (editingTimerIdx < schedule.items.length) {
-      schedule.items[editingTimerIdx].taskId = newTaskId;
-      saveSchedule(schedule);
+    if (!groups.length) {
+      html += '<p class="muted">Inga öppna uppgifter. Lägg till något i översikten så kan du välja det här.</p>';
     }
-    taskDetailModal.classList.add('hidden');
-    editingTaskId = null;
-    editingTimerIdx = null;
-    updateTaskBanner();
-  }
-
-  btnSaveTaskDetail.addEventListener('click', saveTaskDetail);
-  taskDetailName.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      taskDetailDesc.focus();
-    }
-  });
-
-  function saveTaskDetail() {
-    if (!editingTaskId) return;
-    var name = taskDetailName.value.trim();
-    if (!name) return;
-    var newProjectId = taskDetailProject.value || null;
-    var tasks = getTasks();
-    for (var i = 0; i < tasks.length; i++) {
-      if (tasks[i].id === editingTaskId) {
-        tasks[i].name = name;
-        tasks[i].projectId = newProjectId;
-        tasks[i].description = taskDetailDesc.value.trim();
-        var recurVal = taskDetailRecurring.value || null;
-        tasks[i].recurring = recurVal;
-        if (recurVal === 'weekly') {
-          tasks[i].recurDay = new Date().getDay();
-        }
-        break;
-      }
-    }
-    saveTasks(tasks);
-    taskDetailModal.classList.add('hidden');
-    editingTaskId = null;
-    editingTimerIdx = null;
-    renderPlanView();
-    updateTaskBanner();
+    $('pick-list').innerHTML = html;
+    openDialog(pickSheet);
   }
 
   // ========================================
-  // Drag and drop system
+  // Konfetti
   // ========================================
-  var drag = {
-    active: false,
-    started: false,
-    type: null,       // 'task-to-schedule' or 'schedule-reorder'
-    taskId: null,
-    sourceIdx: null,
-    sourceEl: null,
-    ghost: null,
-    startX: 0,
-    startY: 0,
-    threshold: 8
-  };
-
-  function createGhost(text, color) {
-    var el = document.createElement('div');
-    el.className = 'drag-ghost';
-    if (color) el.style.borderLeft = '4px solid ' + color;
-    el.textContent = text;
-    document.body.appendChild(el);
-    return el;
-  }
-
-  function cleanupDrag() {
-    if (drag.ghost) {
-      drag.ghost.remove();
-      drag.ghost = null;
-    }
-    if (drag.sourceEl) {
-      drag.sourceEl.classList.remove('dragging');
-      drag.sourceEl = null;
-    }
-    scheduleList.classList.remove('drop-active');
-    // Remove any placeholders
-    var phs = document.querySelectorAll('.schedule-drop-placeholder, .ts-drop-placeholder');
-    phs.forEach(function (p) { p.remove(); });
-    drag.active = false;
-    drag.started = false;
-    drag.type = null;
-  }
-
-  // --- Task drag (project → schedule) ---
-  function initTaskDrag(el) {
-    var taskId = el.dataset.taskId;
-
-    function onStart(clientX, clientY, e) {
-      // Don't drag from buttons
-      if (e.target.closest('.btn-tiny')) return;
-      drag.active = true;
-      drag.started = false;
-      drag.type = 'task-to-schedule';
-      drag.taskId = taskId;
-      drag.sourceEl = el;
-      drag.startX = clientX;
-      drag.startY = clientY;
-    }
-
-    el.addEventListener('touchstart', function (e) {
-      if (e.touches.length !== 1) return;
-      var t = e.touches[0];
-      onStart(t.clientX, t.clientY, e);
-    }, { passive: true });
-
-    el.addEventListener('mousedown', function (e) {
-      if (e.button !== 0) return;
-      onStart(e.clientX, e.clientY, e);
-    });
-  }
-
-  // --- Schedule drag (reorder by task group) ---
-  function initScheduleDrag(item) {
-    var taskId = item.dataset.taskId;
-
-    function onStart(clientX, clientY, e) {
-      if (e.target.closest('.btn-tiny')) return;
-      drag.active = true;
-      drag.started = false;
-      drag.type = 'schedule-reorder';
-      drag.taskId = taskId;
-      drag.sourceEl = item;
-      drag.startX = clientX;
-      drag.startY = clientY;
-    }
-
-    item.addEventListener('touchstart', function (e) {
-      if (e.touches.length !== 1) return;
-      var t = e.touches[0];
-      onStart(t.clientX, t.clientY, e);
-    }, { passive: true });
-
-    item.addEventListener('mousedown', function (e) {
-      if (e.button !== 0) return;
-      onStart(e.clientX, e.clientY, e);
-    });
-  }
-
-  // --- Global move handler ---
-  function onDragMove(clientX, clientY, e) {
-    if (!drag.active) return;
-
-    var dx = clientX - drag.startX;
-    var dy = clientY - drag.startY;
-
-    if (!drag.started) {
-      if (Math.sqrt(dx * dx + dy * dy) < drag.threshold) return;
-      drag.started = true;
-      drag.sourceEl.classList.add('dragging');
-      haptic(10);
-
-      if (drag.type === 'task-to-schedule') {
-        var tasks = getTasks();
-        var projects = getProjects();
-        var task = tasks.filter(function (t) { return t.id === drag.taskId; })[0];
-        var project = task ? projects.filter(function (p) { return p.id === task.projectId; })[0] : null;
-        var color = getProjectColor(project);
-        drag.ghost = createGhost(task ? task.name : '', color);
-        scheduleList.classList.add('drop-active');
-        scheduleEmpty.classList.add('hidden');
-      } else if (drag.type === 'schedule-reorder') {
-        var taskText = drag.sourceEl.querySelector('.schedule-task');
-        drag.ghost = createGhost(taskText ? taskText.textContent : '', null);
-      } else if (drag.type === 'timer-reorder') {
-        var tsName = drag.sourceEl.querySelector('.ts-name');
-        drag.ghost = createGhost(tsName ? tsName.textContent : '', null);
-      }
-    }
-
-    if (!drag.started) return;
-    if (e && e.cancelable) e.preventDefault();
-
-    drag.ghost.style.left = (clientX + 12) + 'px';
-    drag.ghost.style.top = (clientY - 20) + 'px';
-
-    if (drag.type === 'schedule-reorder') {
-      updateReorderPlaceholder(clientY, scheduleList, '.schedule-item', 'schedule-drop-placeholder');
-    } else if (drag.type === 'timer-reorder') {
-      updateReorderPlaceholder(clientY, timerSchedule, '.ts-item', 'ts-drop-placeholder');
-    }
-  }
-
-  function updateReorderPlaceholder(clientY, container, itemSelector, phClass) {
-    var old = container.querySelectorAll('.' + phClass);
-    old.forEach(function (p) { p.remove(); });
-
-    var items = container.querySelectorAll(itemSelector);
-    var insertBefore = null;
-
-    for (var i = 0; i < items.length; i++) {
-      var rect = items[i].getBoundingClientRect();
-      var midY = rect.top + rect.height / 2;
-      if (clientY < midY) {
-        insertBefore = items[i];
-        break;
-      }
-    }
-
-    var ph = document.createElement('div');
-    ph.className = phClass;
-    if (insertBefore) {
-      container.insertBefore(ph, insertBefore);
-    } else {
-      container.appendChild(ph);
-    }
-  }
-
-  // --- Global end handler ---
-  function onDragEnd(clientX, clientY) {
-    if (!drag.active) return;
-
-    if (drag.started) {
-      if (drag.type === 'task-to-schedule') {
-        // Check if dropped over schedule area
-        var scheduleRect = document.getElementById('schedule-section').getBoundingClientRect();
-        var overSchedule = clientY >= scheduleRect.top - 40 && clientY <= scheduleRect.bottom + 40;
-        if (overSchedule) {
-          addToSchedule(drag.taskId);
-          renderSchedule();
-          renderProjects();
-        }
-      } else if (drag.type === 'schedule-reorder') {
-        // Group-based reorder in plan view
-        var ph = scheduleList.querySelector('.schedule-drop-placeholder');
-        var newGroupIdx = 0;
-        if (ph) {
-          var sibling = scheduleList.firstChild;
-          var count = 0;
-          while (sibling) {
-            if (sibling === ph) break;
-            if (sibling.classList && sibling.classList.contains('schedule-item')) count++;
-            sibling = sibling.nextSibling;
-          }
-          newGroupIdx = count;
-        }
-        reorderScheduleGroups(drag.taskId, newGroupIdx);
-      } else if (drag.type === 'timer-reorder') {
-        // Individual item reorder — leave empty slot behind
-        var ph = timerSchedule.querySelector('.ts-drop-placeholder');
-        var newIdx = 0;
-        if (ph) {
-          var sibling = timerSchedule.firstChild;
-          var count = 0;
-          while (sibling) {
-            if (sibling === ph) break;
-            if (sibling.classList && sibling.classList.contains('ts-item')) count++;
-            sibling = sibling.nextSibling;
-          }
-          newIdx = count;
-        }
-        var schedule = getSchedule();
-        var fromIdx = drag.sourceIdx;
-        if (fromIdx !== newIdx && fromIdx !== newIdx - 1) {
-          var movedItem = schedule.items[fromIdx];
-          schedule.items[fromIdx] = { taskId: null, done: false };
-          schedule.items.splice(newIdx, 0, movedItem);
-          saveSchedule(schedule);
-        }
-        updateTaskBanner();
-      }
-    } else if (drag.taskId) {
-      // Wasn't a drag (no movement)
-      if (drag.type === 'task-to-schedule') {
-        // Tap on task in plan view → add to schedule
-        addToSchedule(drag.taskId);
-        renderSchedule();
-        renderProjects();
-      } else if (drag.type === 'timer-reorder') {
-        openTaskDetail(drag.taskId, drag.sourceIdx);
-      } else {
-        openTaskDetail(drag.taskId);
-      }
-    }
-
-    cleanupDrag();
-  }
-
-  function reorderScheduleGroups(draggedTaskId, newGroupIdx) {
-    var schedule = getSchedule();
-    // Build current group order (unique taskIds by first occurrence)
-    var groupOrder = [];
-    var seen = {};
-    for (var i = 0; i < schedule.items.length; i++) {
-      var tid = schedule.items[i].taskId;
-      if (!seen[tid]) {
-        seen[tid] = true;
-        groupOrder.push(tid);
-      }
-    }
-    var oldIdx = groupOrder.indexOf(draggedTaskId);
-    if (oldIdx === -1) return;
-    if (oldIdx === newGroupIdx || oldIdx === newGroupIdx - 1) {
-      renderSchedule();
-      return;
-    }
-    // Remove from old position and insert at new
-    groupOrder.splice(oldIdx, 1);
-    var targetIdx = oldIdx < newGroupIdx ? newGroupIdx - 1 : newGroupIdx;
-    groupOrder.splice(targetIdx, 0, draggedTaskId);
-    // Rebuild items array in new group order
-    var itemsByTask = {};
-    for (var i = 0; i < schedule.items.length; i++) {
-      var tid = schedule.items[i].taskId;
-      if (!itemsByTask[tid]) itemsByTask[tid] = [];
-      itemsByTask[tid].push(schedule.items[i]);
-    }
-    var newItems = [];
-    for (var i = 0; i < groupOrder.length; i++) {
-      var taskItems = itemsByTask[groupOrder[i]];
-      if (taskItems) {
-        for (var j = 0; j < taskItems.length; j++) {
-          newItems.push(taskItems[j]);
-        }
-      }
-    }
-    schedule.items = newItems;
-    saveSchedule(schedule);
-    renderSchedule();
-  }
-
-  // Touch events
-  document.addEventListener('touchmove', function (e) {
-    if (!drag.active) return;
-    var t = e.touches[0];
-    onDragMove(t.clientX, t.clientY, e);
-  }, { passive: false });
-
-  document.addEventListener('touchend', function (e) {
-    if (!drag.active) return;
-    var t = e.changedTouches[0];
-    onDragEnd(t.clientX, t.clientY);
-  });
-
-  document.addEventListener('touchcancel', function () {
-    if (drag.active) cleanupDrag();
-  });
-
-  // Mouse events (for desktop)
-  document.addEventListener('mousemove', function (e) {
-    if (!drag.active) return;
-    onDragMove(e.clientX, e.clientY, e);
-  });
-
-  document.addEventListener('mouseup', function (e) {
-    if (!drag.active) return;
-    onDragEnd(e.clientX, e.clientY);
-  });
-
-  // ========================================
-  // Quick-add task from timer
-  // ========================================
-  var quickAddModal = document.getElementById('quick-add-modal');
-  var quickAddName = document.getElementById('quick-add-name');
-  var quickAddProject = document.getElementById('quick-add-project');
-  var btnQuickAddSave = document.getElementById('btn-quick-add-save');
-  var btnTimerAdd = document.getElementById('btn-timer-add');
-
-  btnTimerAdd.addEventListener('click', function () {
-    // Populate project dropdown
-    var projects = getProjects();
-    quickAddProject.innerHTML = '<option value="">&Ouml;vrigt</option>' +
-      projects.map(function (p) {
-        return '<option value="' + p.id + '">' + escapeHtml(p.name) + '</option>';
-      }).join('');
-    quickAddName.value = '';
-    quickAddModal.classList.remove('hidden');
-    quickAddName.focus();
-  });
-
-  btnQuickAddSave.addEventListener('click', saveQuickAdd);
-  quickAddName.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter') saveQuickAdd();
-  });
-
-  function saveQuickAdd() {
-    var name = quickAddName.value.trim() || 'Ny uppgift';
-    var projectId = quickAddProject.value || null;
-
-    // Create the task
-    var tasks = getTasks();
-    var taskId = generateId();
-    tasks.push({ id: taskId, projectId: projectId, name: name });
-    saveTasks(tasks);
-
-    // Add to schedule
-    var schedule = getSchedule();
-    schedule.items.push({ taskId: taskId, done: false });
-    saveSchedule(schedule);
-
-    quickAddModal.classList.add('hidden');
-    updateTaskBanner();
-  }
-
-  // Close modals on backdrop click
-  [logModal, scheduleModal, projectModal, taskModal, taskDetailModal, quickAddModal].forEach(function (modal) {
-    modal.addEventListener('click', function (e) {
-      if (e.target === modal) {
-        modal.classList.add('hidden');
-      }
-    });
-  });
-
-  // ========================================
-  // Stats
-  // ========================================
-  var statsPeriod = 'day';
-  var statsOffset = 0;
-
-  statsTabs.forEach(function (tab) {
-    tab.addEventListener('click', function () {
-      statsTabs.forEach(function (t) { t.classList.remove('active'); });
-      tab.classList.add('active');
-      statsPeriod = tab.dataset.period;
-      statsOffset = 0;
-      renderStats();
-    });
-  });
-
-  statsPrev.addEventListener('click', function () {
-    statsOffset++;
-    renderStats();
-  });
-
-  statsNext.addEventListener('click', function () {
-    if (statsOffset > 0) {
-      statsOffset--;
-      renderStats();
-    }
-  });
-
-  function getDateRange(period, offset) {
-    var now = new Date();
-    var start, end, label;
-
-    if (period === 'day') {
-      var d = new Date(now);
-      d.setDate(d.getDate() - offset);
-      var dateStr = d.toISOString().slice(0, 10);
-      start = dateStr;
-      end = dateStr;
-      if (offset === 0) {
-        label = 'Idag';
-      } else if (offset === 1) {
-        label = 'Ig\u00e5r';
-      } else {
-        label = d.toLocaleDateString('sv-SE', { weekday: 'long', day: 'numeric', month: 'short' });
-      }
-    } else if (period === 'week') {
-      var monday = new Date(now);
-      var dayOfWeek = monday.getDay();
-      var diff = (dayOfWeek === 0 ? 6 : dayOfWeek - 1);
-      monday.setDate(monday.getDate() - diff - (offset * 7));
-      var sunday = new Date(monday);
-      sunday.setDate(sunday.getDate() + 6);
-      start = monday.toISOString().slice(0, 10);
-      end = sunday.toISOString().slice(0, 10);
-      if (offset === 0) {
-        label = 'Denna vecka';
-      } else if (offset === 1) {
-        label = 'F\u00f6rra veckan';
-      } else {
-        label = monday.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' }) +
-          ' \u2013 ' + sunday.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
-      }
-    } else {
-      var monthDate = new Date(now.getFullYear(), now.getMonth() - offset, 1);
-      var lastDay = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 0);
-      start = monthDate.toISOString().slice(0, 10);
-      end = lastDay.toISOString().slice(0, 10);
-      label = monthDate.toLocaleDateString('sv-SE', { month: 'long', year: 'numeric' });
-      label = label.charAt(0).toUpperCase() + label.slice(1);
-    }
-
-    return { start: start, end: end, label: label };
-  }
-
-  function renderStats() {
-    var range = getDateRange(statsPeriod, statsOffset);
-    statsPeriodLabel.textContent = range.label;
-
-    var sessions = getSessions();
-    var filtered = sessions.filter(function (s) {
-      return s.date >= range.start && s.date <= range.end;
-    });
-
-    var activities = {};
-    var totalMinutes = 0;
-    filtered.forEach(function (s) {
-      if (!activities[s.activity]) {
-        activities[s.activity] = { minutes: 0, count: 0 };
-      }
-      activities[s.activity].minutes += s.duration;
-      activities[s.activity].count++;
-      totalMinutes += s.duration;
-    });
-
-    var sorted = Object.keys(activities).map(function (name) {
-      return { name: name, minutes: activities[name].minutes, count: activities[name].count };
-    }).sort(function (a, b) { return b.minutes - a.minutes; });
-
-    var hours = Math.floor(totalMinutes / 60);
-    var mins = totalMinutes % 60;
-    var timeStr = hours > 0 ? hours + 'h ' + mins + 'min' : mins + ' min';
-    statsSummary.innerHTML =
-      '<div class="total-time">' + timeStr + '</div>' +
-      '<div class="total-label">Total tid</div>' +
-      '<div class="total-sessions">' + filtered.length + ' pomodoro' + (filtered.length !== 1 ? 's' : '') + '</div>';
-
-    if (sorted.length === 0) {
-      statsBreakdown.innerHTML = '<div class="no-data">Inga sessioner under denna period</div>';
-      return;
-    }
-
-    var maxMinutes = sorted[0].minutes;
-    statsBreakdown.innerHTML = sorted.map(function (item) {
-      var pct = Math.round((item.minutes / maxMinutes) * 100);
-      var h = Math.floor(item.minutes / 60);
-      var m = item.minutes % 60;
-      var t = h > 0 ? h + 'h ' + m + 'min' : m + ' min';
-      return '<div class="activity-row">' +
-        '<div class="activity-header">' +
-        '<span class="activity-name">' + escapeHtml(item.name) + '</span>' +
-        '<span class="activity-time">' + t + '</span>' +
-        '</div>' +
-        '<div class="activity-bar-bg"><div class="activity-bar" style="width:' + pct + '%"></div></div>' +
-        '<div class="activity-sessions">' + item.count + ' session' + (item.count !== 1 ? 'er' : '') + '</div>' +
-        '</div>';
-    }).join('');
-  }
-
-  function escapeHtml(str) {
-    var div = document.createElement('div');
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
-  // ========================================
-  // Theme toggle
-  // ========================================
-  var btnThemeToggle = document.getElementById('btn-theme-toggle');
-
-  function applyTheme(light) {
-    if (light) {
-      document.body.classList.add('light-theme');
-      btnThemeToggle.innerHTML = '&#9788;'; // sun
-      document.querySelector('meta[name="theme-color"]').content = '#f0f0f5';
-    } else {
-      document.body.classList.remove('light-theme');
-      btnThemeToggle.innerHTML = '&#9789;'; // moon
-      document.querySelector('meta[name="theme-color"]').content = '#1a1a2e';
-    }
-  }
-
-  btnThemeToggle.addEventListener('click', function () {
-    var isLight = document.body.classList.toggle('light-theme');
-    localStorage.setItem('pomodoro_theme', isLight ? 'light' : 'dark');
-    applyTheme(isLight);
-    haptic(10);
-  });
-
-  // ========================================
-  // Haptic feedback
-  // ========================================
-  function haptic(ms) {
-    try { if (navigator.vibrate) navigator.vibrate(ms || 8); } catch (e) {}
-  }
-
-  // ========================================
-  // Streak counter
-  // ========================================
-  var streakCounter = document.getElementById('streak-counter');
-
-  function calculateStreak() {
-    var sessions = getSessions();
-    if (sessions.length === 0) return 0;
-    var dates = {};
-    for (var i = 0; i < sessions.length; i++) {
-      dates[sessions[i].date] = true;
-    }
-    var d = new Date();
-    // If no session today, start from yesterday
-    if (!dates[d.toISOString().slice(0, 10)]) {
-      d.setDate(d.getDate() - 1);
-    }
-    var streak = 0;
-    while (dates[d.toISOString().slice(0, 10)]) {
-      streak++;
-      d.setDate(d.getDate() - 1);
-    }
-    return streak;
-  }
-
-  function updateStreakCounter() {
-    var streak = calculateStreak();
-    if (streak >= 2) {
-      streakCounter.textContent = streak + ' dagar i rad!';
-    } else {
-      streakCounter.textContent = '';
-    }
-  }
-
-  // ========================================
-  // Day start time & time estimate
-  // ========================================
-  var dayStartTimeInput = document.getElementById('day-start-time');
-  var scheduleTimeEstimate = document.getElementById('schedule-time-estimate');
-
-  dayStartTimeInput.value = localStorage.getItem('pomodoro_day_start') || '09:00';
-  dayStartTimeInput.addEventListener('change', function () {
-    localStorage.setItem('pomodoro_day_start', dayStartTimeInput.value);
-    renderSchedule();
-  });
-
-  function getDayStartMinutes() {
-    var val = dayStartTimeInput.value || '09:00';
-    var parts = val.split(':');
-    return parseInt(parts[0]) * 60 + parseInt(parts[1]);
-  }
-
-  function formatMinutesAsTime(totalMin) {
-    var h = Math.floor(totalMin / 60) % 24;
-    var m = totalMin % 60;
-    return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
-  }
-
-  function updateTimeEstimate() {
-    var schedule = getSchedule();
-    var totalPoms = schedule.items.length;
-    if (totalPoms === 0) {
-      scheduleTimeEstimate.textContent = '';
-      return;
-    }
-    var totalMin = totalPoms * WORK_MINUTES + (totalPoms - 1) * BREAK_MINUTES;
-    var h = Math.floor(totalMin / 60);
-    var m = totalMin % 60;
-    var str = '~';
-    if (h > 0) str += h + 'h ';
-    str += m + 'min planerat';
-    scheduleTimeEstimate.textContent = str;
-  }
-
-  // ========================================
-  // Recurring tasks
-  // ========================================
-  var taskDetailRecurring = document.getElementById('task-detail-recurring');
-
-  function autoAddRecurringTasks() {
-    var tasks = getTasks();
-    var schedule = getSchedule();
-    var scheduledTaskIds = schedule.items.map(function (i) { return i.taskId; });
-    var today = new Date();
-    var dayOfWeek = today.getDay(); // 0=sun
-
-    var changed = false;
-    for (var i = 0; i < tasks.length; i++) {
-      var t = tasks[i];
-      if (!t.recurring) continue;
-      if (scheduledTaskIds.indexOf(t.id) !== -1) continue;
-
-      if (t.recurring === 'daily') {
-        schedule.items.push({ taskId: t.id, done: false });
-        scheduledTaskIds.push(t.id);
-        changed = true;
-      } else if (t.recurring === 'weekly') {
-        // Add on same weekday as creation, default monday (1)
-        var recurDay = t.recurDay != null ? t.recurDay : 1;
-        if (dayOfWeek === recurDay) {
-          schedule.items.push({ taskId: t.id, done: false });
-          scheduledTaskIds.push(t.id);
-          changed = true;
-        }
-      }
-    }
-    if (changed) saveSchedule(schedule);
-  }
-
-  // ========================================
-  // Confetti effect
-  // ========================================
-  var confettiCanvas = document.getElementById('confetti-canvas');
-  var confettiCtx = confettiCanvas.getContext('2d');
-  var confettiParticles = [];
+  var confetti = $('confetti');
   var confettiRunning = false;
 
   function launchConfetti() {
     if (confettiRunning) return;
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    var ctx = confetti.getContext && confetti.getContext('2d');
+    if (!ctx) return;
     confettiRunning = true;
-    confettiCanvas.width = window.innerWidth;
-    confettiCanvas.height = window.innerHeight;
-    confettiParticles = [];
-
-    var colors = ['#e94560', '#53a8b6', '#f0a500', '#a855f7', '#34d399', '#f472b6', '#60a5fa', '#fb923c'];
-    for (var i = 0; i < 80; i++) {
-      confettiParticles.push({
-        x: Math.random() * confettiCanvas.width,
+    confetti.width = window.innerWidth;
+    confetti.height = window.innerHeight;
+    var parts = [];
+    for (var i = 0; i < 90; i++) {
+      parts.push({
+        x: Math.random() * confetti.width,
         y: -20 - Math.random() * 200,
         w: 6 + Math.random() * 6,
         h: 4 + Math.random() * 4,
-        color: colors[Math.floor(Math.random() * colors.length)],
+        color: C.PROJECT_COLORS[i % C.PROJECT_COLORS.length],
         vx: (Math.random() - 0.5) * 4,
         vy: 2 + Math.random() * 4,
         rot: Math.random() * Math.PI * 2,
@@ -2261,225 +1836,84 @@
         life: 1
       });
     }
-    haptic(50);
-    requestAnimationFrame(animateConfetti);
-  }
-
-  function animateConfetti() {
-    confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
-    var alive = false;
-    for (var i = 0; i < confettiParticles.length; i++) {
-      var p = confettiParticles[i];
-      p.x += p.vx;
-      p.y += p.vy;
-      p.vy += 0.1;
-      p.rot += p.rotV;
-      p.life -= 0.005;
-      if (p.life <= 0 || p.y > confettiCanvas.height + 20) continue;
-      alive = true;
-      confettiCtx.save();
-      confettiCtx.translate(p.x, p.y);
-      confettiCtx.rotate(p.rot);
-      confettiCtx.globalAlpha = p.life;
-      confettiCtx.fillStyle = p.color;
-      confettiCtx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
-      confettiCtx.restore();
+    haptic(40);
+    function frame() {
+      ctx.clearRect(0, 0, confetti.width, confetti.height);
+      var alive = false;
+      parts.forEach(function (p) {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.1;
+        p.rot += p.rotV;
+        p.life -= 0.006;
+        if (p.life <= 0 || p.y > confetti.height + 20) return;
+        alive = true;
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        ctx.restore();
+      });
+      if (alive) requestAnimationFrame(frame);
+      else {
+        confettiRunning = false;
+        ctx.clearRect(0, 0, confetti.width, confetti.height);
+      }
     }
-    if (alive) {
-      requestAnimationFrame(animateConfetti);
-    } else {
-      confettiRunning = false;
-      confettiCtx.clearRect(0, 0, confettiCanvas.width, confettiCanvas.height);
-    }
-  }
-
-  var lastAllDoneState = false;
-  function checkAllDoneConfetti() {
-    var schedule = getSchedule();
-    var realItems = schedule.items.filter(function (i) { return i.taskId; });
-    if (realItems.length === 0) { lastAllDoneState = false; return; }
-    var allDone = realItems.every(function (i) { return i.done; });
-    if (allDone && !lastAllDoneState) {
-      launchConfetti();
-    }
-    lastAllDoneState = allDone;
+    requestAnimationFrame(frame);
   }
 
   // ========================================
-  // Swipe gestures on timer schedule items
+  // Synk mellan flikar, nytt dygn och återkomst
   // ========================================
-  function initTimerSwipe(el, idx) {
-    var startX = 0, currentX = 0, swiping = false;
-    var inner = el.querySelector('.ts-item-inner');
-    var bgDone = el.querySelector('.bg-done');
-    var bgRemove = el.querySelector('.bg-remove');
-    var threshold = 80;
-
-    function onTouchStart(e) {
-      if (e.touches.length !== 1) return;
-      if (e.target.closest('.btn-tiny')) return;
-      startX = e.touches[0].clientX;
-      currentX = startX;
-      swiping = true;
-      el.classList.add('swiping');
+  window.addEventListener('storage', function (e) {
+    if (e.key === KEY.projects || e.key === KEY.tasks || e.key === KEY.sessions) {
+      state = C.normalizeData({
+        projects: read(KEY.projects, []),
+        tasks: read(KEY.tasks, []),
+        sessions: read(KEY.sessions, [])
+      });
+      render();
+    } else if (e.key === KEY.timer) {
+      timer = loadTimer();
+      if (timer.running) startTicking();
+      else stopTicking();
+      render();
+    } else if (e.key === KEY.settings) {
+      settings = loadSettings();
+      applyTheme();
+      render();
     }
+  });
 
-    function onTouchMove(e) {
-      if (!swiping) return;
-      currentX = e.touches[0].clientX;
-      var dx = currentX - startX;
-      inner.style.transform = 'translateX(' + dx + 'px)';
-      if (dx > 20) {
-        bgDone.style.opacity = Math.min(1, (dx - 20) / threshold);
-        bgRemove.style.opacity = 0;
-      } else if (dx < -20) {
-        bgRemove.style.opacity = Math.min(1, (-dx - 20) / threshold);
-        bgDone.style.opacity = 0;
-      } else {
-        bgDone.style.opacity = 0;
-        bgRemove.style.opacity = 0;
-      }
-    }
-
-    function onTouchEnd() {
-      if (!swiping) return;
-      swiping = false;
-      el.classList.remove('swiping');
-      var dx = currentX - startX;
-      if (dx > threshold) {
-        // Swipe right → mark done
-        haptic(15);
-        el.classList.add('swipe-away');
-        setTimeout(function () {
-          var schedule = getSchedule();
-          if (idx < schedule.items.length) {
-            schedule.items[idx].done = true;
-            saveSchedule(schedule);
-            updateTaskBanner();
-            checkAllDoneConfetti();
-          }
-        }, 250);
-        return;
-      } else if (dx < -threshold) {
-        // Swipe left → remove
-        haptic(15);
-        el.classList.add('swipe-away-left');
-        setTimeout(function () {
-          var schedule = getSchedule();
-          if (idx < schedule.items.length) {
-            schedule.items.splice(idx, 1);
-            saveSchedule(schedule);
-            updateTaskBanner();
-          }
-        }, 250);
-        return;
-      }
-      // Snap back
-      inner.style.transform = '';
-      bgDone.style.opacity = 0;
-      bgRemove.style.opacity = 0;
-    }
-
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: true });
-    el.addEventListener('touchend', onTouchEnd);
+  function onWake() {
+    if (timer.running) tick();
+    if (today() !== lastRenderDay) render();
   }
 
-  // ========================================
-  // Play button (quick-start from plan view)
-  // ========================================
-  function playTask(taskId) {
-    haptic(12);
-    // Ensure task is in schedule
-    var schedule = getSchedule();
-    var found = false;
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (schedule.items[i].taskId === taskId && !schedule.items[i].done) {
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      schedule.items.push({ taskId: taskId, done: false });
-      saveSchedule(schedule);
-    }
-
-    // Reorder so this task's first undone item is at the front of undone items
-    schedule = getSchedule();
-    var firstUndone = -1;
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (!schedule.items[i].done) {
-        firstUndone = i;
-        break;
-      }
-    }
-    var targetIdx = -1;
-    for (var i = 0; i < schedule.items.length; i++) {
-      if (schedule.items[i].taskId === taskId && !schedule.items[i].done) {
-        targetIdx = i;
-        break;
-      }
-    }
-    if (targetIdx > firstUndone) {
-      var item = schedule.items.splice(targetIdx, 1)[0];
-      schedule.items.splice(firstUndone, 0, item);
-      saveSchedule(schedule);
-    }
-
-    // Switch to timer view and start
-    navBtns.forEach(function (b) { b.classList.remove('active'); });
-    navBtns[0].classList.add('active');
-    views.forEach(function (v) { v.classList.remove('active'); });
-    document.getElementById('timer-view').classList.add('active');
-    updateTaskBanner();
-
-    if (!isRunning && !isBreak) {
-      startTimer();
-    }
-  }
-
-  // ========================================
-  // Init
-  // ========================================
-
-  // Migrate: assign colors to projects that don't have one
-  (function migrateProjectColors() {
-    var projects = getProjects();
-    var changed = false;
-    var usedColors = projects.map(function (p) { return p.color; }).filter(Boolean);
-    for (var i = 0; i < projects.length; i++) {
-      if (!projects[i].color) {
-        // Pick first unused color
-        for (var c = 0; c < PROJECT_COLORS.length; c++) {
-          if (usedColors.indexOf(PROJECT_COLORS[c]) === -1) {
-            projects[i].color = PROJECT_COLORS[c];
-            usedColors.push(PROJECT_COLORS[c]);
-            changed = true;
-            break;
-          }
-        }
-        if (!projects[i].color) {
-          projects[i].color = PROJECT_COLORS[i % PROJECT_COLORS.length];
-          changed = true;
-        }
-      }
-    }
-    if (changed) saveProjects(projects);
-  })();
-
-  // Apply saved theme
-  applyTheme(localStorage.getItem('pomodoro_theme') === 'light');
-
-  // Auto-add recurring tasks for today
-  autoAddRecurringTasks();
-
-  updateDisplay();
-  countTodayPomodoros();
-  updateTaskBanner();
-  updateStreakCounter();
-
-  // Update now-line position every 60 s
+  document.addEventListener('visibilitychange', function () {
+    if (!document.hidden) onWake();
+  });
+  window.addEventListener('focus', onWake);
   setInterval(function () {
-    if (!isRunning) updateTaskBanner();
-  }, 60000);
+    if (today() !== lastRenderDay && !anyDialogOpen()) render();
+  }, 30000);
+
+  // ========================================
+  // Start
+  // ========================================
+  applyTheme();
+
+  // Ett pass som tog slut medan appen var stängd loggas tyst
+  var finishedWhileAway = false;
+  for (var guard = 0; guard < 3 && timer.running && Date.now() >= timer.endTime; guard++) {
+    if (timer.phase === 'work') finishedWhileAway = true;
+    finishPhase(true);
+  }
+
+  setView(timer.running ? 'focus' : 'overview');
+  if (timer.running) startTicking();
+  if (finishedWhileAway) toast('Ett fokuspass blev klart medan appen var stängd och är sparat.');
 })();

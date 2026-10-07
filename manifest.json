@@ -1,12 +1,13 @@
 {
-  "name": "Pomodoro Timer",
+  "name": "Pomodoro – planering och fokus",
   "short_name": "Pomodoro",
-  "description": "Pomodoro-timer med aktivitetsloggning och statistik",
+  "description": "Överblick över det du ska göra, projekt med deadlines och en pomodoro-timer.",
+  "lang": "sv",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#1a1a2e",
-  "theme_color": "#1a1a2e",
-  "orientation": "portrait",
+  "background_color": "#f6f5f2",
+  "theme_color": "#f6f5f2",
+  "orientation": "any",
   "icons": [
     {
       "src": "icon.svg",
