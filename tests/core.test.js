@@ -322,7 +322,7 @@ test('import: deadline ingen, fel och upprepning', function () {
   var parsed = C.parsePlan([
     '## Kandidatuppsats | deadline ingen',
     '- [ ] 2026-13-01 Fel datum',
-    '- [ ] 25:00 Fel tid',
+    '- [ ] 2026-10-09 25:00 Fel tid',
     'Bara text',
     '---',
     '- [x] 2026-10-07 Träna (varje vecka)'
@@ -355,4 +355,141 @@ test('säkerhetskopia går att läsa tillbaka', function () {
   assert.deepEqual(back.data, d);
   assert.equal(back.settings.theme, 'dark');
   assert.throws(function () { C.readBackup('{"hej":1}'); });
+});
+
+// ---------- Rundgång och import, svåra fall ----------
+function roundTrip(d) {
+  var out = C.exportText(d, TODAY, NOW);
+  var parsed = C.parsePlan(out);
+  return { parsed: parsed, res: C.applyPlan(d, parsed, TODAY, NOW), out: out };
+}
+
+test('rundgång tål knepiga namn', function () {
+  var d = data(
+    [
+      project('p1', 'Jobb | Hem', { deadline: '2026-11-01' }),
+      project('p2', 'Projekt: Hemligt'),
+      project('p3', '**Fet**'),
+      project('p4', 'Övrigt'),
+      project('p5', '\\Snedstreck')
+    ],
+    [
+      task('a', '9.30 Tandläkare'),
+      task('b', '9.30 Tandläkare imorgon', { date: '2026-10-08' }),
+      task('c', '2026-11-01 Deklarera', { projectId: 'p1' }),
+      task('d', 'Städa (varje vecka)', { projectId: 'p2' }),
+      task('e', 'Tvätta (varje dag)', { projectId: 'p3', date: TODAY, recurring: 'daily' }),
+      task('f', '\\backslash', { projectId: 'p5' }),
+      task('g', 'I riktiga Övrigt', { projectId: 'p4' }),
+      task('h', 'Rad ett\nrad två')
+    ]
+  );
+  var r = roundTrip(d);
+  assert.deepEqual(r.parsed.errors, []);
+  assert.deepEqual(r.res.changes, []);
+  assert.deepEqual(r.res.data, d);
+  assert.equal(d.tasks[7].name, 'Rad ett rad två');
+  assert.match(r.out, /## Inget projekt\n- \[ \] 2026-10-08 \\9\.30 Tandläkare imorgon\n- \[ \] \\9\.30 Tandläkare\n/);
+  assert.match(r.out, /- \[ \] Städa \\\(varje vecka\)\n/);
+  assert.match(r.out, /## Jobb \\\| Hem \| deadline 2026-11-01/);
+});
+
+test('import: samma namn flera gånger matchar rätt datum', function () {
+  var d = data([project('p1', 'Träning')], [
+    task('g1', 'Gym', { projectId: 'p1', date: '2026-10-08', createdAt: 1 }),
+    task('g2', 'Gym', { projectId: 'p1', date: '2026-10-10', createdAt: 2 }),
+    task('g3', 'Gym', { projectId: 'p1', date: '2026-10-12', createdAt: 3 })
+  ]);
+  assert.deepEqual(roundTrip(d).res.changes, []);
+  var res = C.applyPlan(d, C.parsePlan('## Träning\n- [x] 2026-10-10 Gym\n- [-] 2026-10-12 Gym'), TODAY, NOW);
+  var byId = {};
+  res.data.tasks.forEach(function (t) { byId[t.id] = t; });
+  assert.equal(byId.g1.done, false);
+  assert.equal(byId.g2.done, true);
+  assert.equal(byId.g3, undefined);
+  assert.match(res.changes[1].text, /Tas bort: Gym \(mån 12 okt\)/);
+});
+
+test('import: [x] med bara namnet behåller datum och upprepning', function () {
+  var d = data([], [
+    task('r', 'Löpning', { date: TODAY, recurring: 'weekly' }),
+    task('s', 'Ring banken', { date: '2026-10-05', time: '09:00' })
+  ]);
+  var res = C.applyPlan(d, C.parsePlan('- [x] Löpning\n- [x] Ring banken'), TODAY, NOW);
+  var byId = {};
+  res.data.tasks.forEach(function (t) { byId[t.id] = t; });
+  assert.equal(byId.r.recurring, 'weekly');
+  assert.equal(byId.r.date, '2026-10-14');
+  assert.equal(byId.r.done, false);
+  assert.equal(byId.s.done, true);
+  assert.equal(byId.s.date, '2026-10-05');
+  assert.equal(byId.s.time, '09:00');
+});
+
+test('import: arkiverade projekt återanvänds inte', function () {
+  var d = data([project('old', 'Deklaration', { archived: true })], [task('x', 'Gammal', { projectId: 'old', done: true, doneAt: 1 })]);
+  var res = C.applyPlan(d, C.parsePlan('## Deklaration | deadline 2027-05-02\n- [ ] 2027-04-01 Samla kvitton'), TODAY, NOW);
+  assert.equal(res.data.projects.length, 2);
+  var fresh = res.data.projects[1];
+  assert.equal(fresh.archived, false);
+  assert.equal(fresh.deadline, '2027-05-02');
+  assert.equal(res.data.tasks[1].projectId, fresh.id);
+  assert.equal(res.data.projects[0].deadline, null);
+});
+
+test('import: flera kodblock – det sista gäller', function () {
+  var parsed = C.parsePlan('Alt A:\n```\n## Uppsats\n- [ ] 2026-10-09 Skriva\n```\nAlt B:\n```\n## Uppsats\n- [ ] 2026-10-12 Skriva\n```');
+  assert.equal(parsed.projects.length, 1);
+  assert.equal(parsed.projects[0].tasks[0].date, '2026-10-12');
+  assert.equal(parsed.notes.length, 1);
+  var res = C.applyPlan(data([], []), parsed, TODAY, NOW);
+  assert.equal(res.data.tasks.length, 1);
+  assert.equal(res.changes[0].type, 'note');
+});
+
+test('import: fetstil och okända delar i rubriker', function () {
+  var parsed = C.parsePlan('## **Uppsats** | **Deadline:** 2026-12-01 | prio hög\n- [ ] Läsa');
+  assert.equal(parsed.projects[0].name, 'Uppsats');
+  assert.equal(parsed.projects[0].deadline, '2026-12-01');
+  assert.equal(parsed.errors.length, 1);
+  assert.match(parsed.errors[0].message, /Okänd del/);
+});
+
+test('migrering: gårdagens oavklarade schema blir försenat, veckorytm behålls', function () {
+  var old = {
+    projects: [{ id: 'p', name: 'Jobb' }],
+    tasks: [
+      { id: 'a', projectId: 'p', name: 'Igår ej klar' },
+      { id: 'b', projectId: 'p', name: 'Igår klar' },
+      { id: 'c', projectId: 'p', name: 'Gammalt format' },
+      { id: 'w', projectId: 'p', name: 'Fredagsstäd', recurring: 'weekly', recurDay: 5 },
+      { id: 'z', projectId: 'p', name: 'Länge sedan' }
+    ],
+    schedule: { date: '2026-10-06', items: [{ taskId: 'a', done: false }, { taskId: 'b', done: true }] },
+    scheduleHistory: {
+      '2026-10-05': [{ taskId: 'c', pomodoros: 2, completed: 1 }],
+      '2026-09-01': [{ taskId: 'z', done: false }]
+    }
+  };
+  var d = C.migrateV1(old, [TODAY, TODAY], NOW);
+  var byId = {};
+  d.tasks.forEach(function (t) { byId[t.id] = t; });
+  assert.equal(byId.a.date, '2026-10-06');
+  assert.equal(byId.b.date, null);
+  assert.equal(byId.c.date, null); // bara det senaste schemat räknas
+  assert.equal(byId.z.date, null);
+  assert.equal(byId.w.date, '2026-10-09');
+
+  var withToday = C.migrateV1({
+    tasks: [{ id: 'w', name: 'Fredagsstäd', recurring: 'weekly', recurDay: 5 }],
+    schedule: { date: TODAY, items: [{ taskId: 'w', done: false }] }
+  }, [TODAY], NOW);
+  assert.equal(withToday.tasks[0].date, '2026-10-09');
+});
+
+test('veckorubriken börjar efter dagarna som redan visas', function () {
+  var d = data([], [task('a', 'Måndag', { date: '2026-10-12' }), task('b', 'Onsdag', { date: '2026-10-14' })]);
+  var a = C.buildAgenda(d, TODAY);
+  var week = a.sections.filter(function (s) { return s.key === 'week:2026-10-12'; })[0];
+  assert.equal(week.subtitle, '14–18 okt');
 });

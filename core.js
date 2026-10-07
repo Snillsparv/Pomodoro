@@ -172,6 +172,10 @@
     return typeof v === 'string' ? v : (v == null ? '' : String(v));
   }
 
+  function oneLine(s) {
+    return text(s).replace(/\s+/g, ' ').trim();
+  }
+
   function normName(s) {
     return text(s).trim().replace(/\s+/g, ' ').toLowerCase();
   }
@@ -198,7 +202,7 @@
     if (!p || typeof p !== 'object' || p.id == null || p.id === '') return null;
     return {
       id: String(p.id),
-      name: text(p.name).trim() || 'Namnlöst projekt',
+      name: oneLine(p.name) || 'Namnlöst projekt',
       color: isColor(p.color) ? p.color : PROJECT_COLORS[i % PROJECT_COLORS.length],
       deadline: isDateStr(p.deadline) ? p.deadline : null,
       notes: text(p.notes),
@@ -214,7 +218,7 @@
     return {
       id: String(t.id),
       projectId: t.projectId != null && projectIds[t.projectId] ? String(t.projectId) : null,
-      name: text(t.name).trim() || 'Namnlös uppgift',
+      name: oneLine(t.name) || 'Namnlös uppgift',
       notes: text(t.notes != null ? t.notes : t.description),
       date: date,
       time: date ? normalizeTime(t.time) : null,
@@ -254,9 +258,23 @@
     return { projects: projects, tasks: tasks, sessions: sessions };
   }
 
+  // Ett schemablock från gamla versionen räknas som oavklarat om något pass
+  // återstår (två format: {taskId, done} och {taskId, pomodoros, completed})
+  function unfinishedIds(items) {
+    var ids = {};
+    (Array.isArray(items) ? items : []).forEach(function (it) {
+      if (!it || !it.taskId) return;
+      var open = typeof it.done !== 'undefined' ? !it.done : (it.completed || 0) < (it.pomodoros || 1);
+      if (open) ids[it.taskId] = true;
+    });
+    return ids;
+  }
+
   // Gamla versionen: uppgifter utan datum + ett dagsschema med pomodoro-block.
-  // Uppgifter som låg i dagens schema får dagens datum, återkommande uppgifter
-  // får sitt nästa datum, resten hamnar under "Utan datum".
+  // Uppgifter i dagens schema får dagens datum. Oavklarade uppgifter från det
+  // senaste schemat före idag (det gamla "flytta över") får det datumet och
+  // syns som försenade. Återkommande uppgifter får sitt nästa datum och
+  // resten hamnar under "Utan datum".
   // todayDates: datum som räknas som "idag" (lokalt + UTC, eftersom gamla
   // versionen sparade schemats datum i UTC).
   function migrateV1(old, todayDates, now) {
@@ -282,18 +300,32 @@
       });
     }
 
+    // Senaste schemat före idag (högst två veckor gammalt)
+    var past = {};
+    var history = old.scheduleHistory && typeof old.scheduleHistory === 'object' ? old.scheduleHistory : {};
+    Object.keys(history).forEach(function (d) { past[d] = history[d]; });
+    if (schedule && isDateStr(schedule.date) && Array.isArray(schedule.items)) past[schedule.date] = schedule.items;
+    var lastDate = Object.keys(past).filter(function (d) {
+      return isDateStr(d) && d < today && todayDates.indexOf(d) === -1 && diffDays(d, today) <= 14;
+    }).sort().pop();
+    var carryover = lastDate ? unfinishedIds(past[lastDate]) : {};
+
     var tasks = (Array.isArray(old.tasks) ? old.tasks : []).map(function (t) {
       if (!t || typeof t !== 'object') return t;
       var copy = {};
       for (var k in t) copy[k] = t[k];
       var date = isDateStr(t.date) ? t.date : null;
+      var weekly = t.recurring === 'weekly';
       if (t.recurring === 'daily') {
         date = date || today;
-      } else if (t.recurring === 'weekly' && !date) {
+      } else if (weekly && !date) {
+        // Veckorytmen behålls: nästa gång på samma veckodag som förut
         var wd = typeof t.recurDay === 'number' ? t.recurDay : 1;
         date = addDays(today, (wd - weekdayOf(today) + 7) % 7);
+      } else if (!date && carryover[t.id]) {
+        date = lastDate;
       }
-      if (inTodaysSchedule[t.id]) date = today;
+      if (inTodaysSchedule[t.id] && !weekly) date = today;
       copy.date = date;
       copy.done = !!t.done;
       if (typeof copy.createdAt !== 'number') copy.createdAt = now;
@@ -374,7 +406,9 @@
       if (n < 7) return section('day:' + date, capitalize(WEEKDAYS[weekdayOf(date)]), formatDayMonth(date, today), false);
       var week = startOfWeek(date);
       if (diffDays(startOfWeek(today), week) <= weeksAhead * 7) {
-        return section('week:' + week, 'Vecka ' + isoWeek(date), formatRange(week, addDays(week, 6), today), true);
+        // Dagarna före today+7 har egna rubriker ovanför, så intervallet börjar där
+        var from = week < addDays(today, 7) ? addDays(today, 7) : week;
+        return section('week:' + week, 'Vecka ' + isoWeek(date), formatRange(from, addDays(week, 6), today), true);
       }
       var month = date.slice(0, 7);
       var title = capitalize(MONTHS[+month.slice(5, 7) - 1]);
@@ -571,19 +605,51 @@
   // ========================================
   // Export som text (för att diskutera med Claude)
   // ========================================
-  var CLAUDE_NOTE = [
-    '> Till Claude: Det här är min planering från min Pomodoro-app. Hjälp mig att få överblick, prioritera och planera.',
-    '> Om du föreslår ändringar: skriv dem som ett kodblock i samma format som under "Plan", så klistrar jag in det i appen (Dela → Importera).',
-    '> Format: `## Projektnamn | deadline ÅÅÅÅ-MM-DD` per projekt (`| deadline ingen` tar bort deadline; utan deadline-del lämnas den orörd).',
-    '> Uppgifter under rubriken: `- [ ] ÅÅÅÅ-MM-DD HH:MM Namn (varje vecka)`. Datum, tid och upprepning (varje dag / varje vardag / varje vecka) är valfria; en uppgift utan datum blir odaterad.',
-    '> `[x]` = klar, `[-]` = ta bort. Uppgifter och projekt som inte står med lämnas orörda, så det räcker att skicka det som ändras. Uppgifter utan projekt står under `## Övrigt`. Rader som börjar med `>` är anteckningar och ignoreras.'
-  ];
+  var NONE_NAMES = ['Övrigt', 'Inget projekt', 'Utan projekt'];
+  var NONE_RE = /^(övrigt|inget projekt|utan projekt)$/i;
+
+  // Rubriken för uppgifter utan projekt – får inte krocka med ett riktigt projekt
+  function noneHeading(projects) {
+    var taken = {};
+    projects.forEach(function (p) { if (!p.archived) taken[normName(p.name)] = true; });
+    for (var i = 0; i < NONE_NAMES.length; i++) {
+      if (!taken[normName(NONE_NAMES[i])]) return NONE_NAMES[i];
+    }
+    return NONE_NAMES[0];
+  }
+
+  function claudeNote(none) {
+    return [
+      '> Till Claude: Det här är min planering från min Pomodoro-app. Hjälp mig att få överblick, prioritera och planera.',
+      '> Om du föreslår ändringar: skriv dem i ETT kodblock i samma format som under "Plan", så klistrar jag in det i appen (Dela → Importera).',
+      '> Format: `## Projektnamn | deadline ÅÅÅÅ-MM-DD` per projekt (`| deadline ingen` tar bort deadline; utan deadline-del lämnas den orörd).',
+      '> Uppgifter under rubriken: `- [ ] ÅÅÅÅ-MM-DD HH:MM Namn (varje vecka)`. Datum, tid och upprepning (varje dag / varje vardag / varje vecka) är valfria; en öppen uppgift `[ ]` utan datum blir odaterad.',
+      '> `[x]` = klar, `[-]` = ta bort – för dem räcker namnet. Uppgifter och projekt som inte står med lämnas orörda, så det räcker att skicka det som ändras.',
+      '> Uppgifter utan projekt står under `## ' + none + '`. Rader som börjar med `>` är anteckningar och ignoreras. Ett `\\` först i ett namn betyder att resten ska läsas bokstavligt.'
+    ];
+  }
+
+  var DATE_OR_TIME_START = /^(\d{4}-\d{2}-\d{2}|\d{1,2}[:.]\d{2})(\s|$)/;
+  var RECUR_END = /(\((?:varje dag|varje vardag|varje vecka)\)\s*)$/i;
+
+  // Namn som annars skulle tolkas som datum, tid eller upprepning skyddas med \
+  function escapeTaskName(name) {
+    var out = name.replace(RECUR_END, '\\$1');
+    if (DATE_OR_TIME_START.test(out) || out.charAt(0) === '\\') out = '\\' + out;
+    return out;
+  }
+
+  function escapeProjectName(name) {
+    var out = name.replace(/\|/g, '\\|');
+    if (/^projekt\s*:/i.test(out) || /^(\*\*|__).*\1$/.test(out) || out.charAt(0) === '\\') out = '\\' + out;
+    return out;
+  }
 
   function exportTaskLine(t) {
     var parts = [t.done ? '- [x]' : '- [ ]'];
     if (t.date) parts.push(t.date);
     if (t.date && t.time) parts.push(t.time);
-    parts.push(t.name);
+    parts.push(escapeTaskName(t.name));
     var line = parts.join(' ');
     if (t.recurring) line += ' (' + RECURRING[t.recurring] + ')';
     return line;
@@ -597,11 +663,12 @@
   function exportText(data, today, now) {
     var projects = indexById(data.projects);
     var active = sortProjects(data.projects.filter(function (p) { return !p.archived; }));
+    var none = noneHeading(data.projects);
     var L = [];
 
     L.push('# Min planering – ' + formatLong(today) + ' (vecka ' + isoWeek(today) + ')');
     L.push('');
-    L = L.concat(CLAUDE_NOTE);
+    L = L.concat(claudeNote(none));
     L.push('');
 
     L.push('## Projekt');
@@ -641,7 +708,7 @@
         var line = item.done ? '- [x] ' : '- [ ] ';
         if (sec.multiDay) line += formatShort(t.date, today) + ' ';
         if (t.time) line += t.time + ' ';
-        line += t.name + ' · ' + (p ? p.name : NO_PROJECT_NAME);
+        line += t.name + ' · ' + (p ? p.name : none);
         if (t.recurring) line += ' (' + RECURRING[t.recurring] + ')';
         L.push(line);
       });
@@ -680,11 +747,10 @@
       });
     }
     active.forEach(function (p) {
-      block('## ' + p.name + (p.deadline ? ' | deadline ' + p.deadline : ''), p.notes, planTasks(p.id));
+      block('## ' + escapeProjectName(p.name) + (p.deadline ? ' | deadline ' + p.deadline : ''), p.notes, planTasks(p.id));
     });
     var loose = planTasks(null);
-    if (loose.length) block('## ' + NO_PROJECT_NAME, '', loose);
-    if (first) L.push('## ' + NO_PROJECT_NAME);
+    if (loose.length || first) block('## ' + none, '', loose);
     L.push('```');
 
     return L.join('\n');
@@ -699,6 +765,7 @@
   var RECUR_RE = /\s*\((varje dag|varje vardag|varje vecka)\)\s*$/i;
   var RECUR_KEYS = { 'varje dag': 'daily', 'varje vardag': 'weekdays', 'varje vecka': 'weekly' };
 
+  // Plockar ut kodblocken med en plan. Finns flera används det sista.
   function extractFenced(src) {
     var re = /(^|\n)[ \t]*(```|~~~)[^\n]*\n([\s\S]*?)\n[ \t]*\2[ \t]*(?=\n|$)/g;
     var blocks = [];
@@ -711,26 +778,51 @@
       });
       if (useful) blocks.push(body);
     }
-    return blocks.length ? blocks.join('\n') : null;
+    return blocks;
+  }
+
+  // Delar på | som inte är skyddade med \
+  function splitPipes(s) {
+    var parts = [''];
+    for (var i = 0; i < s.length; i++) {
+      if (s.charAt(i) === '\\' && s.charAt(i + 1) === '|') {
+        parts[parts.length - 1] += '|';
+        i++;
+      } else if (s.charAt(i) === '|') {
+        parts.push('');
+      } else {
+        parts[parts.length - 1] += s.charAt(i);
+      }
+    }
+    return parts.map(function (x) { return x.trim(); });
   }
 
   function parseHeading(s) {
-    var parts = s.split('|').map(function (x) { return x.trim(); });
-    var name = parts[0].replace(/^projekt\s*:\s*/i, '').replace(/\*\*/g, '').trim();
+    var parts = splitPipes(s);
+    var raw = parts[0];
+    var literal = raw.charAt(0) === '\\';
+    var name = literal ? raw.slice(1).trim()
+      : raw.replace(/^projekt\s*:\s*/i, '').replace(/^(\*\*|__)(.+)\1$/, '$2').trim();
     var out = {
       name: name,
-      isNone: /^(övrigt|inget projekt|utan projekt)$/i.test(name),
+      isNone: !literal && NONE_RE.test(name),
       deadline: undefined,
       tasks: [],
-      error: null
+      error: null,
+      warnings: []
     };
     for (var i = 1; i < parts.length; i++) {
-      var m = /^deadline\s*:?\s*(.*)$/i.exec(parts[i]);
-      if (!m) continue;
+      var part = parts[i].replace(/\*\*|__/g, '').trim();
+      if (!part) continue;
+      var m = /^deadline\s*:?\s*(.*)$/i.exec(part);
+      if (!m) {
+        out.warnings.push('Okänd del i rubriken: "' + part + '"');
+        continue;
+      }
       var v = m[1].trim();
       if (!v || /^(ingen|inget|-|–|none)$/i.test(v)) out.deadline = null;
       else if (isDateStr(v)) out.deadline = v;
-      else out.error = 'Ogiltigt datum för deadline: "' + v + '" (använd ÅÅÅÅ-MM-DD)';
+      else out.warnings.push('Ogiltigt datum för deadline: "' + v + '" (använd ÅÅÅÅ-MM-DD)');
     }
     if (!name) out.error = 'Rubriken saknar projektnamn';
     return out;
@@ -748,36 +840,46 @@
       task.date = m[1];
       rest = rest.slice(m[0].length);
     }
-    m = /^(\d{1,2}[:.]\d{2})(?:\s+|$)/.exec(rest);
-    if (m) {
-      task.time = normalizeTime(m[1]);
-      if (!task.time) return { error: 'Ogiltig tid: ' + m[1] };
-      rest = rest.slice(m[0].length);
+    var literal = rest.charAt(0) === '\\';
+    if (literal) {
+      rest = rest.slice(1);
+    } else if (task.date) {
+      m = /^(\d{1,2}[:.]\d{2})(?:\s+|$)/.exec(rest);
+      if (m) {
+        task.time = normalizeTime(m[1]);
+        if (!task.time) return { error: 'Ogiltig tid: ' + m[1] };
+        rest = rest.slice(m[0].length);
+      }
     }
     m = RECUR_RE.exec(rest);
-    if (m) {
+    if (m && rest.charAt(m.index + m[0].indexOf('(') - 1) !== '\\') {
       task.recurring = RECUR_KEYS[m[1].toLowerCase()];
       rest = rest.slice(0, m.index);
     }
-    task.name = rest.trim();
+    task.name = rest.trim().replace(/\\(\((?:varje dag|varje vardag|varje vecka)\))$/i, '$1');
     if (!task.name) return { error: 'Uppgiften saknar namn' };
-    if (!task.date) task.time = null;
     return task;
   }
 
   function parsePlan(input) {
     var src = text(input).replace(/\r\n?/g, '\n');
-    var fenced = extractFenced(src);
-    if (fenced !== null) src = fenced;
-    var result = { projects: [], errors: [] };
+    var result = { projects: [], errors: [], notes: [] };
+    var blocks = extractFenced(src);
+    if (blocks.length) {
+      src = blocks[blocks.length - 1];
+      if (blocks.length > 1) {
+        result.notes.push('Texten innehöll ' + blocks.length + ' kodblock med planer – bara det sista används.');
+      }
+    }
     var current = null;
-    src.split('\n').forEach(function (raw, i) {
+    src.split('\n').forEach(function (raw) {
       var line = raw.trim();
       if (!line || line.charAt(0) === '>' || RULE_RE.test(line)) return;
       var h = HEADING_RE.exec(line);
       if (h) {
         current = parseHeading(h[1]);
-        if (current.error) result.errors.push({ line: i + 1, text: line, message: current.error });
+        if (current.error) result.errors.push({ text: line, message: current.error });
+        current.warnings.forEach(function (w) { result.errors.push({ text: line, message: w }); });
         result.projects.push(current);
         return;
       }
@@ -785,17 +887,17 @@
       if (t) {
         var task = parseTaskLine(t[1], t[2]);
         if (task.error) {
-          result.errors.push({ line: i + 1, text: line, message: task.error });
+          result.errors.push({ text: line, message: task.error });
           return;
         }
         if (!current) {
-          current = { name: NO_PROJECT_NAME, isNone: true, deadline: undefined, tasks: [], error: null };
+          current = { name: NO_PROJECT_NAME, isNone: true, deadline: undefined, tasks: [], error: null, warnings: [] };
           result.projects.push(current);
         }
         current.tasks.push(task);
         return;
       }
-      result.errors.push({ line: i + 1, text: line, message: 'Förstod inte raden' });
+      result.errors.push({ text: line, message: 'Förstod inte raden' });
     });
     return result;
   }
@@ -805,61 +907,89 @@
     return formatShort(date, today) + (time ? ' ' + time : '');
   }
 
+  function taskLabel(t, today) {
+    return t.name + (t.date ? ' (' + formatShort(t.date, today) + ')' : '');
+  }
+
+  // Bästa matchningen bland uppgifter med samma namn: samma status och
+  // samma datum först, annars närmaste datum.
+  function bestMatch(candidates, pt) {
+    var wantDone = pt.state === 'done';
+    var best = null;
+    var bestScore = -1;
+    var bestDist = Infinity;
+    candidates.forEach(function (t) {
+      var score = 0;
+      if (t.done === wantDone) score += 4;
+      if (pt.date && t.date === pt.date) score += 2;
+      if (pt.date && t.date === pt.date && pt.time && t.time === pt.time) score += 1;
+      var dist = pt.date && t.date ? Math.abs(diffDays(pt.date, t.date)) : 100000;
+      if (score > bestScore || (score === bestScore && dist < bestDist)) {
+        best = t;
+        bestScore = score;
+        bestDist = dist;
+      }
+    });
+    return best;
+  }
+
   // Tillämpar en tolkad plan på en kopia av datan. Inget ändras i originalet,
   // så appen kan visa förhandsgranskningen först.
   function applyPlan(data, parsed, today, now) {
     var next = JSON.parse(JSON.stringify(data));
-    var changes = [];
+    var changes = (parsed.notes || []).map(function (n) { return { type: 'note', text: n }; });
     var used = {};
 
+    function activeProject(name) {
+      var key = normName(name);
+      return next.projects.filter(function (p) { return !p.archived && normName(p.name) === key; })[0] || null;
+    }
+
     parsed.projects.forEach(function (pp) {
-      if (pp.error && !pp.name) return;
-      var project = null;
-      if (!pp.isNone) {
-        var key = normName(pp.name);
-        var matches = next.projects.filter(function (p) { return normName(p.name) === key; });
-        project = matches.filter(function (p) { return !p.archived; })[0] || matches[0] || null;
-        if (!project) {
-          project = {
-            id: uid(), name: pp.name, color: nextColor(next.projects),
-            deadline: pp.deadline || null, notes: '', archived: false, createdAt: now
-          };
-          next.projects.push(project);
-          changes.push({ type: 'add', text: 'Nytt projekt: ' + pp.name +
-            (project.deadline ? ' (deadline ' + formatShort(project.deadline, today) + ')' : '') });
-        } else if (pp.deadline !== undefined && !pp.error && project.deadline !== pp.deadline) {
-          changes.push({ type: 'change', text: pp.deadline
-            ? project.name + ': deadline ' + formatShort(pp.deadline, today)
-            : project.name + ': deadline borttagen' });
-          project.deadline = pp.deadline;
-        }
+      if (!pp.name) return;
+      // Ett riktigt projekt med samma namn vinner över "Övrigt"
+      var project = activeProject(pp.name);
+      if (!project && !pp.isNone) {
+        project = {
+          id: uid(), name: pp.name, color: nextColor(next.projects),
+          deadline: pp.deadline || null, notes: '', archived: false, createdAt: now
+        };
+        next.projects.push(project);
+        changes.push({ type: 'add', text: 'Nytt projekt: ' + pp.name +
+          (project.deadline ? ' (deadline ' + formatShort(project.deadline, today) + ')' : '') });
+      } else if (project && pp.deadline !== undefined && project.deadline !== pp.deadline) {
+        changes.push({ type: 'change', text: pp.deadline
+          ? project.name + ': deadline ' + formatShort(pp.deadline, today)
+          : project.name + ': deadline borttagen' });
+        project.deadline = pp.deadline;
       }
       var pid = project ? project.id : null;
       var pname = project ? project.name : NO_PROJECT_NAME;
 
       pp.tasks.forEach(function (pt) {
         var key = normName(pt.name);
-        var candidates = next.tasks.filter(function (t) {
+        var task = bestMatch(next.tasks.filter(function (t) {
           return t.projectId === pid && !used[t.id] && normName(t.name) === key;
-        });
-        var wantDone = pt.state === 'done';
-        var task = candidates.filter(function (t) { return t.done === wantDone; })[0] || candidates[0] || null;
+        }), pt);
         if (task) used[task.id] = true;
+        var wantDone = pt.state === 'done';
 
         if (pt.state === 'remove') {
           if (task) {
             next.tasks = next.tasks.filter(function (t) { return t.id !== task.id; });
-            changes.push({ type: 'remove', text: 'Tas bort: ' + task.name + ' · ' + pname });
+            changes.push({ type: 'remove', text: 'Tas bort: ' + taskLabel(task, today) + ' · ' + pname });
           } else {
             changes.push({ type: 'note', text: 'Hittade ingen "' + pt.name + '" att ta bort i ' + pname });
           }
           return;
         }
 
-        var date = pt.date;
+        // [x] med bara namnet ändrar inget annat än att uppgiften blir klar
+        var keep = task && wantDone && !pt.date && !pt.recurring;
+        var date = keep ? task.date : pt.date;
         if (!date && pt.recurring) date = (task && task.date) || today;
-        var time = date ? pt.time : null;
-        var recurring = date ? pt.recurring : null;
+        var time = keep ? task.time : (date ? pt.time : null);
+        var recurring = keep ? task.recurring : (date ? pt.recurring : null);
 
         if (!task) {
           var nt = {
@@ -877,6 +1007,7 @@
           return;
         }
 
+        var label = taskLabel(task, today);
         var diffs = [];
         if (task.date !== date || task.time !== time) diffs.push(describeDate(date, time, today));
         if (task.recurring !== recurring) diffs.push(recurring ? RECURRING[recurring] : 'upprepas inte');
@@ -892,7 +1023,7 @@
           task.doneAt = null;
           diffs.push('inte klar');
         }
-        if (diffs.length) changes.push({ type: 'change', text: task.name + ': ' + diffs.join(', ') + ' · ' + pname });
+        if (diffs.length) changes.push({ type: 'change', text: label + ' → ' + diffs.join(', ') + ' · ' + pname });
       });
     });
 
@@ -966,6 +1097,7 @@
     parsePlan: parsePlan,
     applyPlan: applyPlan,
     makeBackup: makeBackup,
-    readBackup: readBackup
+    readBackup: readBackup,
+    noneHeading: noneHeading
   };
 });

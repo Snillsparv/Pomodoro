@@ -25,6 +25,7 @@
   --shadow-lg: 0 12px 40px rgba(20, 15, 10, 0.2);
   --toast-bg: #232328;
   --toast-text: #f4f4f6;
+  --toast-action: #ff8a8d;
   --radius: 16px;
   --tabbar-h: 64px;
 }
@@ -53,6 +54,7 @@
     --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
     --toast-bg: #f2f2f5;
     --toast-text: #17171b;
+    --toast-action: #b42d34;
   }
 }
 
@@ -79,6 +81,7 @@
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
   --toast-bg: #f2f2f5;
   --toast-text: #17171b;
+  --toast-action: #b42d34;
 }
 
 /* ========================================
@@ -213,6 +216,10 @@ button {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-3);
+}
+
+.topbar h1:focus {
+  outline: none;
 }
 
 .topbar h1 {
@@ -649,6 +656,11 @@ select.input {
   color: var(--danger);
 }
 
+.pill.is-done {
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
 .pill.is-soon {
   background: var(--warn-soft);
   color: var(--warn);
@@ -889,6 +901,7 @@ select.input {
 }
 
 .dl-card {
+  min-width: 0;
   flex: 0 0 min(80%, 270px);
   scroll-snap-align: start;
   display: flex;
@@ -903,6 +916,7 @@ select.input {
 }
 
 .dl-top {
+  min-width: 0;
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -1028,6 +1042,7 @@ select.input {
 
   .dl-list {
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     margin: 0;
     padding: 0;
     overflow: visible;
@@ -1079,6 +1094,11 @@ select.input {
   border: 0;
   background: none;
   text-align: left;
+}
+
+.proj-head:focus-visible {
+  outline-offset: -3px;
+  border-radius: var(--radius);
 }
 
 .proj-head .dot {
@@ -1165,6 +1185,13 @@ select.input {
 
 .proj-edit {
   margin: 8px 8px 0 0;
+}
+
+.proj-edit-spacer {
+  display: block;
+  flex: none;
+  width: 42px;
+  height: 42px;
 }
 
 .proj-body {
@@ -1439,9 +1466,6 @@ select.input {
 }
 
 .tile-note {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   font-size: 12px;
   color: var(--text-3);
 }
@@ -1469,6 +1493,7 @@ select.input {
   grid-template-columns: repeat(7, minmax(0, 1fr));
   align-items: end;
   height: 132px;
+  padding-top: 22px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -1484,6 +1509,7 @@ select.input {
 
 .col-bar {
   display: block;
+  flex: none;
   width: min(24px, 62%);
   border-radius: 4px 4px 0 0;
   background: color-mix(in srgb, var(--accent) 45%, var(--surface));
@@ -1494,8 +1520,10 @@ select.input {
 }
 
 .col-value {
-  display: block;
-  margin-bottom: 4px;
+  position: absolute;
+  bottom: calc(var(--h, 0%) + 4px);
+  left: 50%;
+  transform: translateX(-50%);
   font-size: 11.5px;
   font-weight: 650;
   color: var(--text-2);
@@ -1852,7 +1880,7 @@ dialog.sheet::backdrop {
   border: 0;
   border-radius: 10px;
   background: none;
-  color: var(--accent);
+  color: var(--toast-action);
   font-weight: 750;
 }
 

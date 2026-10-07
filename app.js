@@ -40,14 +40,14 @@
     }
   }
 
-  var storageWarned = false;
+  var storageWarnedAt = 0;
   function write(key, value) {
     try {
       localStorage.setItem(key, JSON.stringify(value));
       return true;
     } catch (e) {
-      if (!storageWarned) {
-        storageWarned = true;
+      if (Date.now() - storageWarnedAt > 30000) {
+        storageWarnedAt = Date.now();
         setTimeout(function () {
           toast('Kunde inte spara – webbläsarens lagring är full eller blockerad.');
         }, 0);
@@ -70,7 +70,8 @@
 
     // Första starten efter uppdateringen: spara en orörd kopia av den gamla
     // datan och flytta över allt till den nya modellen.
-    if (readRaw(KEY.projects) || readRaw(KEY.tasks) || readRaw(KEY.sessions)) {
+    var hasOld = readRaw(KEY.projects) || readRaw(KEY.tasks) || readRaw(KEY.sessions);
+    if (hasOld && !readRaw(KEY.v1Backup)) {
       try {
         localStorage.setItem(KEY.v1Backup, JSON.stringify({
           savedAt: new Date().toISOString(),
@@ -83,19 +84,30 @@
       } catch (e) { /* ingen plats – migreringen fortsätter ändå */ }
     }
     raw.schedule = read('pomodoro_schedule', null);
+    raw.scheduleHistory = read('pomodoro_schedule_history', null);
     var migrated = C.migrateV1(raw, [today(), new Date().toISOString().slice(0, 10)], Date.now());
-    saveData(migrated);
-    try {
-      localStorage.setItem(KEY.version, DATA_VERSION);
-    } catch (e) { /* ignoreras */ }
+    var saved = saveData(migrated);
+    if (!saved && readRaw(KEY.v1Backup)) {
+      // Kopian tog platsen – den nya datan är viktigare
+      try { localStorage.removeItem(KEY.v1Backup); } catch (e) { /* ignoreras */ }
+      saved = saveData(migrated);
+    }
+    // Versionen markeras bara när allt verkligen sparats; annars migreras
+    // det igen från den gamla datan nästa gång.
+    if (saved) {
+      try {
+        localStorage.setItem(KEY.version, DATA_VERSION);
+      } catch (e) { /* ignoreras */ }
+    }
     return migrated;
   }
 
   function saveData(data) {
     data = data || state;
-    write(KEY.projects, data.projects);
-    write(KEY.tasks, data.tasks);
-    write(KEY.sessions, data.sessions);
+    var ok = write(KEY.projects, data.projects);
+    ok = write(KEY.tasks, data.tasks) && ok;
+    ok = write(KEY.sessions, data.sessions) && ok;
+    return ok;
   }
 
   function clampInt(v, min, max, fallback) {
@@ -118,6 +130,22 @@
 
   function saveSettings() {
     write(KEY.settings, settings);
+  }
+
+  // Validerar och sparar inställningar (t.ex. från en säkerhetskopia)
+  function applySettings(s) {
+    s = s || {};
+    settings = {
+      theme: ['system', 'light', 'dark'].indexOf(s.theme) !== -1 ? s.theme : settings.theme,
+      workMin: clampInt(s.workMin, 1, 180, settings.workMin),
+      breakMin: clampInt(s.breakMin, 1, 60, settings.breakMin)
+    };
+    saveSettings();
+    applyTheme();
+    if (!timer.running && timer.remaining === timer.total) {
+      setPhase(timer.phase);
+      saveTimer();
+    }
   }
 
   function loadUi() {
@@ -259,9 +287,12 @@
   // Toast med ångra
   // ========================================
   var toastTimer = null;
+  var toastUndo = null;
+  var toastDelay = 0;
 
   function toast(message, actionLabel, action) {
     var t = el.toast;
+    toastUndo = actionLabel ? action : null;
     t.innerHTML = '<span class="toast-msg"></span>' + (actionLabel ? '<button type="button"></button>' : '');
     t.querySelector('.toast-msg').textContent = message;
     if (actionLabel) {
@@ -283,11 +314,21 @@
         t.showPopover();
       } catch (e) { /* ignoreras */ }
     }
+    toastDelay = actionLabel ? 6000 : 3000;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(hideToast, actionLabel ? 5500 : 3000);
+    toastTimer = setTimeout(hideToast, toastDelay);
   }
 
+  // Toasten ligger kvar så länge pekaren eller tangentbordsfokus är på den
+  el.toast.addEventListener('mouseenter', function () { clearTimeout(toastTimer); });
+  el.toast.addEventListener('focusin', function () { clearTimeout(toastTimer); });
+  el.toast.addEventListener('mouseleave', function () {
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(hideToast, toastDelay);
+  });
+
   function hideToast() {
+    toastUndo = null;
     clearTimeout(toastTimer);
     el.toast.hidden = true;
     if (el.toast.hidePopover) {
@@ -399,6 +440,15 @@
     var removed = state.tasks.splice(i, 1)[0];
     commit();
     toast('Borttagen: ' + removed.name, 'Ångra', function () { restoreTask(removed, i); });
+  }
+
+  // Ångra en hel ersättning (import/återställning) utan att tappa fokuspass
+  // som loggats under tiden
+  function restoreSnapshot(before, since) {
+    var newer = state.sessions.filter(function (s) { return (s.timestamp || 0) > since; });
+    state = before;
+    newer.forEach(function (s) { state.sessions.push(s); });
+    commit();
   }
 
   function celebrateIfDayDone() {
@@ -624,8 +674,16 @@
 
   pf.form.addEventListener('submit', function (e) {
     e.preventDefault();
-    var name = pf.name.value.trim();
+    var name = pf.name.value.replace(/\s+/g, ' ').trim();
     if (!name) {
+      pf.name.focus();
+      return;
+    }
+    var clash = state.projects.filter(function (x) {
+      return !x.archived && x.id !== editingProjectId && x.name.toLowerCase() === name.toLowerCase();
+    })[0];
+    if (clash) {
+      toast('Det finns redan ett projekt som heter ' + clash.name + '.');
       pf.name.focus();
       return;
     }
@@ -664,8 +722,11 @@
     closeDialog(projectSheet);
     commit();
     if (p.archived) {
+      var pid = p.id;
       toast(p.name + ' är klart', 'Ångra', function () {
-        p.archived = false;
+        var current = projectById(pid);
+        if (!current) return;
+        current.archived = false;
         commit();
       });
       launchConfetti();
@@ -681,14 +742,17 @@
       : 'Ta bort ' + p.name + '?';
     confirmDialog(msg, 'Ta bort').then(function (ok) {
       if (!ok) return;
-      var before = clone(state);
+      var removedProject = clone(p);
+      var removedTasks = clone(state.tasks.filter(function (t) { return t.projectId === p.id; }));
       state.projects = state.projects.filter(function (x) { return x.id !== p.id; });
       state.tasks = state.tasks.filter(function (t) { return t.projectId !== p.id; });
       closeDialog(projectSheet);
       commit();
       toast('Borttaget: ' + p.name, 'Ångra', function () {
-        state.projects = before.projects;
-        state.tasks = before.tasks;
+        if (!projectById(removedProject.id)) state.projects.push(removedProject);
+        removedTasks.forEach(function (t) {
+          if (taskIndex(t.id) === -1) state.tasks.push(t);
+        });
         commit();
       });
     });
@@ -760,7 +824,7 @@
   var importReview = $('import-review');
   var importPreview = $('import-preview');
   var importApply = $('import-apply');
-  var pendingImport = null;
+  var pendingImport = null; // { parsed, preview }
 
   function openImport() {
     closeDialog(shareSheet);
@@ -790,7 +854,7 @@
     }
     var parsed = C.parsePlan(src);
     var result = C.applyPlan(state, parsed, today(), Date.now());
-    pendingImport = result;
+    pendingImport = { parsed: parsed, preview: result.changes };
     var real = result.changes.filter(function (c) { return c.type !== 'note'; });
     var marks = { add: '+', change: '~', remove: '−', note: 'i', error: '!' };
     var html = '<p class="import-summary">' + (real.length
@@ -801,8 +865,8 @@
         '</span><span>' + esc(c.text) + '</span></li>';
     });
     parsed.errors.forEach(function (err) {
-      items.push('<li class="change-error"><span class="change-mark" aria-hidden="true">!</span><span>Hoppar över rad ' +
-        err.line + ': ' + esc(err.message) + ' – <code>' + esc(err.text) + '</code></span></li>');
+      items.push('<li class="change-error"><span class="change-mark" aria-hidden="true">!</span><span>Hoppar över: ' +
+        esc(err.message) + ' – <code>' + esc(err.text) + '</code></span></li>');
     });
     if (items.length) html += '<ul>' + items.join('') + '</ul>';
     importPreview.innerHTML = html;
@@ -821,16 +885,17 @@
 
   importApply.addEventListener('click', function () {
     if (!pendingImport) return;
+    // Räkna om mot aktuell data så att inget som hänt sedan förhandsgranskningen
+    // (t.ex. ett fokuspass som blev klart) skrivs över
+    var at = Date.now();
+    var result = C.applyPlan(state, pendingImport.parsed, today(), at);
     var before = clone(state);
-    state = C.normalizeData(pendingImport.data);
+    state = C.normalizeData(result.data);
     pendingImport = null;
     importText.value = '';
     closeDialog(importSheet);
     commit();
-    toast('Planen är uppdaterad', 'Ångra', function () {
-      state = before;
-      commit();
-    });
+    toast('Planen är uppdaterad', 'Ångra', function () { restoreSnapshot(before, at); });
   });
 
   // ========================================
@@ -904,13 +969,16 @@
       confirmDialog('Ersätta allt i appen med säkerhetskopian (' + plural(d.projects.length, 'projekt', 'projekt') +
         ', ' + plural(d.tasks.length, 'uppgift', 'uppgifter') + ')?', 'Återställ').then(function (ok) {
         if (!ok) return;
+        var at = Date.now();
         var before = clone(state);
+        var beforeSettings = clone(settings);
         state = d;
+        if (backup.settings) applySettings(backup.settings);
         closeDialog(settingsSheet);
         commit();
         toast('Säkerhetskopian är återställd', 'Ångra', function () {
-          state = before;
-          commit();
+          applySettings(beforeSettings);
+          restoreSnapshot(before, at);
         });
       });
     };
@@ -1120,7 +1188,9 @@
   function focusTask() {
     if (timer.taskId === '') return null;
     var t = timer.taskId ? taskById(timer.taskId) : null;
-    if (t && (!t.done || (timer.running && timer.phase === 'work'))) return t;
+    // Under ett pass visas exakt det som passet loggas på
+    if (timer.running && timer.phase === 'work') return t;
+    if (t && !t.done) return t;
     return suggestedTask();
   }
 
@@ -1289,6 +1359,7 @@
   }
 
   function urgencyPill(p, st, t) {
+    if (p.archived) return '<span class="pill is-done">klart</span>';
     var label = st.daysLeft < 0 ? 'passerad' : C.formatRelative(p.deadline, t);
     return '<span class="pill is-' + st.urgency + '">' + esc(label) + '</span>';
   }
@@ -1312,7 +1383,7 @@
     if (task.recurring) meta.push('<span>' + icon('repeat') + esc(C.RECURRING[task.recurring]) + '</span>');
     if (task.notes) meta.push('<span title="Har anteckningar">' + icon('note') + '<span class="visually-hidden">anteckning</span></span>');
     var n = opts.counts[task.id];
-    if (n) meta.push('<span title="Fokuspass">' + icon('timer') + n + '</span>');
+    if (n) meta.push('<span title="Fokuspass">' + icon('timer') + '<span class="visually-hidden">fokuspass:</span>' + n + '</span>');
 
     var id = esc(task.id);
     return '<li class="row' + (task.done ? ' is-done' : '') + '">' +
@@ -1422,6 +1493,7 @@
       ? '<span>Deadline ' + esc(C.formatShort(p.deadline, t)) + '</span>' + urgencyPill(p, st, t)
       : '<span>' + (loose ? 'Uppgifter utan projekt' : 'Ingen deadline') + '</span>';
     var flags = [];
+    if (p.archived) st = { total: st.total, done: st.done, overdue: 0, afterDeadline: 0, undated: 0, next: null };
     if (st.overdue) flags.push('<span class="meta-late">' + icon('alert') + st.overdue + ' ' + (st.overdue === 1 ? 'försenad' : 'försenade') + '</span>');
     if (st.afterDeadline) flags.push('<span class="meta-warn">' + icon('alert') + st.afterDeadline + ' ' + (st.afterDeadline === 1 ? 'planerad' : 'planerade') + ' efter deadline</span>');
     if (st.undated && p.deadline) flags.push('<span class="muted">' + st.undated + ' utan datum</span>');
@@ -1438,7 +1510,8 @@
       '<span>' + (st.total ? st.done + ' av ' + st.total + ' klara' : 'Inga uppgifter än') + '</span></span>' +
       (flags.length ? '<span class="proj-flags">' + flags.join('') + '</span>' : '') + next +
       '</span></button>' +
-      (loose ? '' : '<button type="button" class="icon-btn proj-edit" data-action="edit-project" data-id="' + esc(p.id) +
+      (loose ? '<span class="proj-edit proj-edit-spacer" aria-hidden="true"></span>'
+        : '<button type="button" class="icon-btn proj-edit" data-action="edit-project" data-id="' + esc(p.id) +
         '" aria-label="Redigera ' + esc(p.name) + '">' + icon('edit') + '</button>') +
       '</div>';
 
@@ -1457,8 +1530,8 @@
           ? '<ul class="rows rows-done">' + doneTasks.map(function (x) { return taskRow(x, rowOpts); }).join('') + '</ul>'
           : '') +
         '<div class="proj-foot">' +
-        '<button type="button" class="btn btn-soft" data-action="add-task" data-project="' + esc(loose ? '' : p.id) + '">' +
-        icon('plus') + 'Lägg till uppgift</button>' +
+        (p.archived ? '' : '<button type="button" class="btn btn-soft" data-action="add-task" data-project="' + esc(loose ? '' : p.id) + '">' +
+        icon('plus') + 'Lägg till uppgift</button>') +
         (doneTasks.length ? '<button type="button" class="btn btn-soft" data-action="toggle-done" data-id="' + esc(key) + '">' +
           (showDone ? 'Dölj klara' : 'Visa klara (' + doneTasks.length + ')') + '</button>' : '') +
         '</div></div>';
@@ -1552,7 +1625,7 @@
       var isToday = d.date === t;
       var label = C.capitalize(C.formatShort(d.date, t)) + ': ' + (d.minutes ? C.formatMinutes(d.minutes) : 'inget');
       var showValue = d.minutes && (isToday || d.date === peakDate);
-      html += '<div class="col' + (isToday ? ' is-today' : '') + '" role="listitem" tabindex="0" aria-label="' + esc(label) + '">' +
+      html += '<div class="col' + (isToday ? ' is-today' : '') + '" style="--h:' + h + '%" role="listitem" tabindex="0" aria-label="' + esc(label) + '">' +
         '<span class="col-tip" aria-hidden="true">' + esc(label) + '</span>' +
         (showValue ? '<span class="col-value" aria-hidden="true">' + esc(C.formatHours(d.minutes)) + '</span>' : '') +
         '<span class="col-bar" style="height:' + h + '%"></span></div>';
@@ -1627,13 +1700,16 @@
     renderTimer();
 
     if (focusKey) {
+      var found = null;
       var candidates = el.main.querySelectorAll('[data-action="' + focusKey.action + '"]');
       for (var i = 0; i < candidates.length; i++) {
         if (candidates[i].dataset.id === focusKey.id) {
-          candidates[i].focus({ preventScroll: true });
+          found = candidates[i];
           break;
         }
       }
+      // Knappen finns inte längre (t.ex. borttagen rad) – lägg fokus på rubriken
+      (found || el.title).focus({ preventScroll: true });
     }
   }
 
@@ -1756,8 +1832,17 @@
     }
   });
 
-  // Snabbkommando på dator: N = ny uppgift
+  // Snabbkommando på dator: N = ny uppgift, Ctrl/Cmd+Z = ångra det senaste
   document.addEventListener('keydown', function (e) {
+    if ((e.key === 'z' || e.key === 'Z') && (e.metaKey || e.ctrlKey) && !e.shiftKey && toastUndo) {
+      var tag0 = (e.target && e.target.tagName) || '';
+      if (/^(INPUT|TEXTAREA)$/.test(tag0) || anyDialogOpen()) return;
+      e.preventDefault();
+      var undo = toastUndo;
+      hideToast();
+      undo();
+      return;
+    }
     if (e.key !== 'n' && e.key !== 'N') return;
     if (e.metaKey || e.ctrlKey || e.altKey || anyDialogOpen()) return;
     var tag = (e.target && e.target.tagName) || '';
