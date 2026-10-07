@@ -191,7 +191,13 @@
     return JSON.parse(JSON.stringify(v));
   }
 
+  // Varje sparad ändring räknas. Ett ångra-erbjudande gäller bara tills
+  // nästa ändring, så det kan aldrig skriva över något nyare.
+  var changeCount = 0;
+
   function commit() {
+    changeCount++;
+    if (toastUndo && changeCount !== toastUndoAt) hideToast();
     saveData();
     render();
   }
@@ -288,11 +294,13 @@
   // ========================================
   var toastTimer = null;
   var toastUndo = null;
+  var toastUndoAt = -1;
   var toastDelay = 0;
 
   function toast(message, actionLabel, action) {
     var t = el.toast;
     toastUndo = actionLabel ? action : null;
+    toastUndoAt = changeCount;
     t.innerHTML = '<span class="toast-msg"></span>' + (actionLabel ? '<button type="button"></button>' : '');
     t.querySelector('.toast-msg').textContent = message;
     if (actionLabel) {
@@ -322,9 +330,13 @@
   // Toasten ligger kvar så länge pekaren eller tangentbordsfokus är på den
   el.toast.addEventListener('mouseenter', function () { clearTimeout(toastTimer); });
   el.toast.addEventListener('focusin', function () { clearTimeout(toastTimer); });
-  el.toast.addEventListener('mouseleave', function () {
+  function resumeToast() {
     clearTimeout(toastTimer);
     toastTimer = setTimeout(hideToast, toastDelay);
+  }
+  el.toast.addEventListener('mouseleave', resumeToast);
+  el.toast.addEventListener('focusout', function (e) {
+    if (!el.toast.contains(e.relatedTarget)) resumeToast();
   });
 
   function hideToast() {
@@ -1846,7 +1858,9 @@
     if (e.key !== 'n' && e.key !== 'N') return;
     if (e.metaKey || e.ctrlKey || e.altKey || anyDialogOpen()) return;
     var tag = (e.target && e.target.tagName) || '';
-    if (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable)) return;
+    // Fält i ett ark som just stängts räknas inte som skrivfokus
+    var inClosedSheet = e.target && e.target.closest && e.target.closest('dialog:not([open])');
+    if (!inClosedSheet && (/^(INPUT|TEXTAREA|SELECT)$/.test(tag) || (e.target && e.target.isContentEditable))) return;
     e.preventDefault();
     if (ui.view === 'projects') openProjectSheet(null);
     else openTaskSheet({ date: today() });
@@ -1954,6 +1968,7 @@
   // Synk mellan flikar, nytt dygn och återkomst
   // ========================================
   window.addEventListener('storage', function (e) {
+    if (e.key === KEY.projects || e.key === KEY.tasks) hideToast();
     if (e.key === KEY.projects || e.key === KEY.tasks || e.key === KEY.sessions) {
       state = C.normalizeData({
         projects: read(KEY.projects, []),
