@@ -1,12 +1,13 @@
-var CACHE_NAME = 'pomodoro-v10';
+// Nätverket först så att uppdateringar syns direkt; cachen används offline.
+var CACHE_NAME = 'pomodoro-v11';
 var ASSETS = [
   './',
   './index.html',
   './style.css',
+  './core.js',
   './app.js',
   './icon.svg',
-  './manifest.json',
-  './bg_cyber.svg'
+  './manifest.json'
 ];
 
 self.addEventListener('install', function (e) {
@@ -31,9 +32,19 @@ self.addEventListener('activate', function (e) {
 });
 
 self.addEventListener('fetch', function (e) {
+  var req = e.request;
+  if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
   e.respondWith(
-    caches.match(e.request).then(function (cached) {
-      return cached || fetch(e.request);
+    fetch(req).then(function (res) {
+      if (res && res.ok) {
+        var copy = res.clone();
+        caches.open(CACHE_NAME).then(function (cache) { cache.put(req, copy); });
+      }
+      return res;
+    }).catch(function () {
+      return caches.match(req, { ignoreSearch: true }).then(function (cached) {
+        return cached || caches.match('./index.html');
+      });
     })
   );
 });
